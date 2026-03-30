@@ -52,7 +52,9 @@ export default function Login() {
           <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-3xl mx-auto mb-4 shadow-inner">
             ⚕️
           </div>
-          <h1 className="text-2xl font-bold text-white">نظام صندوق القديس اليان الحمصي الطبي</h1>
+          <h1 className="text-2xl font-bold text-white">نظام صندوق</h1>
+          <h1 className="text-2xl font-bold text-white">القديس اليان الحمصي الطبي</h1>
+
           <p className="text-blue-200 mt-2 text-sm">أبرشية حمص وتوابعها للروم الأرثوذكس</p>
         </div>
 
