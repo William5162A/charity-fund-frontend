@@ -1,18 +1,20 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
+import { useAuth, ROLES } from '../context/AuthContext';
 
 export default function ProtectedRoute({ children, allowedRoles }) {
-  const userRole = localStorage.getItem('userRole');
+  const { user } = useAuth();
 
-  if (!userRole) {
+  if (!user) {
     return <Navigate to="/" replace />;
   }
 
-  if (!allowedRoles.includes(userRole)) {
-    // 🌟 توجيه ذكي حسب الصلاحية الفعلية
-    if (userRole === 'owner') return <Navigate to="/owner" replace />;
-    if (userRole === 'admin') return <Navigate to="/admin" replace />;
-    if (userRole === 'doctor') return <Navigate to="/doctor" replace />;
+  if (!allowedRoles.includes(user.role)) {
+    // 🌟 تحديث مسارات إعادة التوجيه الصارمة لتتطابق مع المسارات الجديدة في AppRoutes
+    if (user.role === ROLES.ADMIN) return <Navigate to="/admin" replace />;
+    if (user.role === ROLES.PROCESSOR) return <Navigate to="/processor" replace />;
+    if (user.role === ROLES.DOCTOR) return <Navigate to="/doctor" replace />;
+    
     return <Navigate to="/" replace />;
   }
 

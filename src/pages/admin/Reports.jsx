@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { getRequestsData, getGeneralFundBalance } from '../../data/mockData';
 import Sidebar from '../../components/layout/Sidebar';
 import { formatCurrency } from '../../utils/formatters';
+import { fetchAidRequests } from '../../services/api';
 
-// 🌟 المكون الخاص بأزرار الفلتر (معرف بالخارج لتجنب أخطاء الريندر)
 const FilterTab = ({ value, label, currentFilter, onFilterChange }) => {
   const isActive = currentFilter === value;
   return (
@@ -11,7 +10,7 @@ const FilterTab = ({ value, label, currentFilter, onFilterChange }) => {
       onClick={() => onFilterChange(value)}
       className={`px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
         isActive 
-          ? 'bg-blue-600 text-white shadow-md' 
+          ? 'bg-blue-600 text-white shadow-xs' 
           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
       }`}
     >
@@ -28,64 +27,67 @@ export default function Reports() {
     completedCount: 0,
     pendingCount: 0,
     rejectedCount: 0,
-    categoryTotals: {}
+    providerTotals: {}
   });
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [fundBalance, setFundBalance] = useState(0);
   
-  // 🌟 فلتر الوقت الذكي الجديد (مبسط وواضح)
   const [timeFilter, setTimeFilter] = useState('all');
 
+  // 🌟 المعالجة النظيفة لدورة الحياة باستخدام AbortController
   useEffect(() => {
-    let isMounted = true;
+    const abortController = new AbortController();
     
     const loadStats = async () => {
       setLoading(true);
-      await new Promise(resolve => setTimeout(resolve, 300)); 
+      setError(null);
 
-      let data = getRequestsData();
-      const currentFundBalance = getGeneralFundBalance();
-      
-      // 🌟 تطبيق الفلتر الزمني الجديد
-      if (timeFilter !== 'all') {
-        const cutoffDate = new Date();
+      try {
+        let data = await fetchAidRequests();
+        const currentFundBalance = Number(localStorage.getItem('general_fund')) || 100000;
         
-        if (timeFilter === '1m') cutoffDate.setMonth(cutoffDate.getMonth() - 1);
-        else if (timeFilter === '3m') cutoffDate.setMonth(cutoffDate.getMonth() - 3);
-        else if (timeFilter === '6m') cutoffDate.setMonth(cutoffDate.getMonth() - 6);
-        else if (timeFilter === '1y') cutoffDate.setFullYear(cutoffDate.getFullYear() - 1);
-        
-        data = data.filter(req => new Date(req.date) >= cutoffDate);
-      }
-      
-      let estimated = 0;
-      let contributed = 0;
-      let completed = 0;
-      let pending = 0;
-      let rejected = 0;
-      const catTotals = {};
+        if (abortController.signal.aborted) return;
 
-      data.forEach(req => {
-        estimated += Number(req.otherInfo?.estimatedCost || 0);
-        
-        if (req.status === 'مكتمل') completed++;
-        else if (req.status === 'مرفوض') rejected++;
-        else pending++; 
-
-        if (req.contributions && req.contributions.length > 0) {
-          req.contributions.forEach(c => {
-            const amount = Number(c.amount || 0);
-            contributed += amount;
-            
-            if(amount > 0) {
-              catTotals[c.category] = (catTotals[c.category] || 0) + amount;
-            }
-          });
+        if (timeFilter !== 'all') {
+          const cutoffDate = new Date();
+          
+          if (timeFilter === '1m') cutoffDate.setMonth(cutoffDate.getMonth() - 1);
+          else if (timeFilter === '3m') cutoffDate.setMonth(cutoffDate.getMonth() - 3);
+          else if (timeFilter === '6m') cutoffDate.setMonth(cutoffDate.getMonth() - 6);
+          else if (timeFilter === '1y') cutoffDate.setFullYear(cutoffDate.getFullYear() - 1);
+          
+          data = data.filter(req => new Date(req.date_of_aid) >= cutoffDate);
         }
-      });
+        
+        let estimated = 0;
+        let contributed = 0;
+        let completed = 0;
+        let pending = 0;
+        let rejected = 0;
+        const provTotals = {};
 
-      if (isMounted) {
+        data.forEach(req => {
+          estimated += Number(req.estimated_cost || 0);
+          
+          if (req.request_status === 'completed') completed++;
+          else if (req.request_status === 'rejected') rejected++;
+          else pending++; 
+
+          if (Array.isArray(req.providers)) {
+            req.providers.forEach(p => {
+              const amount = Number(p.aid_amount || 0);
+              contributed += amount;
+              
+              if(amount > 0) {
+                const name = p.provider_name || 'جهة غير معروفة';
+                provTotals[name] = (provTotals[name] || 0) + amount;
+              }
+            });
+          }
+        });
+
         setStats({
           totalEstimated: estimated,
           totalContributed: contributed,
@@ -93,15 +95,23 @@ export default function Reports() {
           completedCount: completed,
           pendingCount: pending,
           rejectedCount: rejected,
-          categoryTotals: catTotals
+          providerTotals: provTotals
         });
         setFundBalance(currentFundBalance);
         setLoading(false);
+      } catch (err) {
+        if (!abortController.signal.aborted) {
+          setError(err.message || 'فشل جلب بيانات التقارير');
+          setLoading(false);
+        }
       }
     };
 
     loadStats();
-    return () => { isMounted = false; };
+    
+    return () => {
+      abortController.abort(); // 🌟 تدمير الطلب في حال تغيير الفلتر الزمني بسرعة
+    };
   }, [timeFilter]);
 
   const closureRate = stats.requestsCount > 0 
@@ -116,7 +126,6 @@ export default function Reports() {
   const surplus = stats.totalContributed - stats.totalEstimated;
   const hasSurplus = surplus > 0;
 
-  // الحسابات الهندسية للمخطط الدائري
   const C = 528; 
   const totalCases = stats.requestsCount || 1; 
   
@@ -131,15 +140,14 @@ export default function Reports() {
     <div className="flex bg-gray-50 min-h-screen" dir="rtl">
       <Sidebar />
 
-      <div className="flex-1 p-6 md:p-10 w-full overflow-y-auto">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 border-b border-gray-200 pb-4">
+      <div className="flex-1 p-6 md:p-10 w-full overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-8 gap-4 border-b border-gray-200 pb-4">
           <div>
             <h2 className="text-3xl font-bold text-gray-800">التقارير والإحصائيات المالية</h2>
             <p className="text-gray-500 mt-2 font-bold">نظرة تحليلية شاملة على التدفقات المالية وتوزيع المساهمات</p>
           </div>
           
-          {/* 🌟 شريط أزرار الفلتر الزمني الجديد */}
-          <div className="flex items-center gap-1 bg-white p-1.5 rounded-full border border-gray-200 shadow-sm overflow-x-auto w-full md:w-auto no-scrollbar">
+          <div className="flex items-center gap-1 bg-white p-1.5 rounded-full border border-gray-200 shadow-xs overflow-x-auto w-full xl:w-auto no-scrollbar shrink-0">
             <FilterTab value="all" label="كل الوقت" currentFilter={timeFilter} onFilterChange={setTimeFilter} />
             <FilterTab value="1m" label="آخر شهر" currentFilter={timeFilter} onFilterChange={setTimeFilter} />
             <FilterTab value="3m" label="3 أشهر" currentFilter={timeFilter} onFilterChange={setTimeFilter} />
@@ -149,12 +157,16 @@ export default function Reports() {
         </div>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center h-64">
+          <div className="flex flex-col items-center justify-center h-64 bg-white rounded-2xl border border-gray-100 shadow-sm">
              <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
              <p className="text-gray-500 font-bold mt-4">جاري حساب البيانات للمدة المحددة...</p>
           </div>
+        ) : error ? (
+           <div className="p-8 bg-red-50 border border-red-100 rounded-2xl text-center">
+            <p className="text-red-600 font-bold">⚠️ {error}</p>
+          </div>
         ) : (
-          <>
+          <div className="animate-fadeIn">
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
               
               <div className="bg-white p-6 rounded-2xl shadow-sm border-r-4 border-blue-600 hover:shadow-md transition-shadow">
@@ -193,7 +205,7 @@ export default function Reports() {
                     </div>
                     <div className="bg-cyan-50 p-2 rounded-lg text-cyan-600 text-xl">📈</div>
                   </div>
-                  <p className="text-xs text-cyan-700 mt-3 font-bold bg-cyan-50 inline-block px-2 py-1 rounded">يجب ترحيله للصندوق العام</p>
+                  <p className="text-xs text-cyan-700 mt-3 font-bold bg-cyan-50 inline-block px-2 py-1 rounded">فائض للترحيل للصندوق العام</p>
                 </div>
               ) : (
                 <div className="bg-white p-6 rounded-2xl shadow-sm border-r-4 border-amber-500 hover:shadow-md transition-shadow">
@@ -223,38 +235,38 @@ export default function Reports() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col w-full">
                 <div className="bg-gray-50 p-5 border-b border-gray-100">
-                  <h4 className="font-bold text-gray-800 text-lg">تحليل مصادر الدعم (حسب الفئة)</h4>
-                  <p className="text-xs text-gray-500 mt-1 font-bold">يُظهر حجم مساهمة كل قطاع من إجمالي الدعم المحصل</p>
+                  <h4 className="font-bold text-gray-800 text-lg">تحليل مصادر الدعم</h4>
+                  <p className="text-xs text-gray-500 mt-1 font-bold">يُظهر حجم مساهمة كل جهة من إجمالي الدعم المحصل</p>
                 </div>
-                <div className="p-0 flex-1">
-                  <table className="w-full text-right">
+                <div className="p-0 flex-1 overflow-x-auto">
+                  <table className="w-full text-right min-w-[400px]">
                     <thead>
                       <tr className="text-sm text-gray-400 border-b bg-white">
-                        <th className="p-4 font-bold">اسم الفئة</th>
-                        <th className="p-4 font-bold">المبلغ المساهم به</th>
-                        <th className="p-4 font-bold text-center">النسبة</th>
+                        <th className="p-4 font-bold whitespace-nowrap">الجهة الداعمة</th>
+                        <th className="p-4 font-bold whitespace-nowrap">المبلغ المساهم به</th>
+                        <th className="p-4 font-bold text-center whitespace-nowrap">النسبة</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {Object.entries(stats.categoryTotals)
+                      {Object.entries(stats.providerTotals)
                         .sort(([, valA], [, valB]) => valB - valA)
-                        .map(([cat, val]) => (
-                        <tr key={cat} className="hover:bg-blue-50/30 transition-colors group">
-                          <td className="p-4 font-bold text-gray-700 flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-blue-400 group-hover:bg-blue-600 transition-colors"></span>
-                            {cat}
+                        .map(([provName, val]) => (
+                        <tr key={provName} className="hover:bg-blue-50/30 transition-colors group">
+                          <td className="p-4 font-bold text-gray-700 flex items-center gap-2 whitespace-nowrap">
+                            <span className="w-2 h-2 rounded-full bg-blue-400 group-hover:bg-blue-600 transition-colors shrink-0"></span>
+                            {provName}
                           </td>
-                          <td className="p-4 text-emerald-600 font-bold">{formatCurrency(val)}</td>
+                          <td className="p-4 text-emerald-600 font-bold whitespace-nowrap">{formatCurrency(val)}</td>
                           <td className="p-4 text-center">
-                            <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-bold border border-blue-100">
+                            <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-bold border border-blue-100 inline-block whitespace-nowrap">
                               {((val / stats.totalContributed) * 100).toFixed(1)}%
                             </span>
                           </td>
                         </tr>
                       ))}
-                      {Object.keys(stats.categoryTotals).length === 0 && (
+                      {Object.keys(stats.providerTotals).length === 0 && (
                         <tr>
                           <td colSpan="3" className="p-10 text-center text-gray-400 font-bold">لم يتم تسجيل مساهمات في هذه الفترة</td>
                         </tr>
@@ -268,7 +280,7 @@ export default function Reports() {
                  <h4 className="text-lg font-bold text-gray-800 mb-2 w-full text-right">مؤشر كفاءة إغلاق الحالات</h4>
                  <p className="text-xs text-gray-500 mb-8 w-full text-right border-b pb-4 font-bold">توزيع حالات المرضى ضمن هذه الفترة</p>
                  
-                 <div className="relative w-48 h-48 flex items-center justify-center mb-8">
+                 <div className="relative w-48 h-48 flex items-center justify-center mb-8 shrink-0">
                     <svg className="w-full h-full transform -rotate-90">
                       <circle cx="96" cy="96" r="84" stroke="currentColor" strokeWidth="16" fill="transparent" className="text-gray-100" />
                       
@@ -319,7 +331,7 @@ export default function Reports() {
               </div>
 
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>

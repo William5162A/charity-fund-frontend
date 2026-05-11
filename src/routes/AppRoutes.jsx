@@ -1,6 +1,7 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './ProtectedRoute';
+import { ROLES } from '../context/AuthContext';
 
 // استيراد الصفحات
 import Login from '../pages/auth/Login';
@@ -13,13 +14,14 @@ import Reports from '../pages/admin/Reports';
 import Supporters from '../pages/admin/Supporters';
 import SupportersManager from '../pages/admin/SupportersManager';
 
-// 🌟 الحيلة الذكية: تجميع الصفحات المشتركة في مكون واحد لمنع تكرار الكود
+// تجميع الصفحات المشتركة
 const ManagementRoutes = () => (
   <Routes>
     <Route path="" element={<Dashboard />} />
     <Route path="request/:id" element={<RequestDetails />} />
     <Route path="new-requests" element={<RequestsList key="new" />} />
     <Route path="completed" element={<RequestsList key="completed" />} />
+    {/* ملاحظة أمنية: مسارات users و supporters-manager ستكون متاحة كمسار للجنة، لكن الباك إند سيرفض طلباتهم بـ 403 */}
     <Route path="users" element={<UsersManager />} />
     <Route path="reports" element={<Reports />} />
     <Route path="supporters" element={<Supporters />} />
@@ -33,21 +35,28 @@ export default function AppRoutes() {
       <Route path="/" element={<Login />} />
       
       {/* مسار الطبيب */}
-      <Route path="/doctor" element={
-        <ProtectedRoute allowedRoles={['doctor']}><DoctorForm /></ProtectedRoute>
+      <Route path="/doctor/*" element={
+        <ProtectedRoute allowedRoles={[ROLES.DOCTOR]}>
+          <DoctorForm />
+        </ProtectedRoute>
       } />
       
-      {/* 🌟 مسار الأدمن (محمي للأدمن فقط) */}
+      {/* 🌟 المسار الجديد للجنة الإدارية */}
+      <Route path="/processor/*" element={
+        <ProtectedRoute allowedRoles={[ROLES.PROCESSOR]}>
+          <ManagementRoutes />
+        </ProtectedRoute>
+      } />
+      
+      {/* 🌟 المسار الجديد للمدير العام */}
       <Route path="/admin/*" element={
-        <ProtectedRoute allowedRoles={['admin']}><ManagementRoutes /></ProtectedRoute>
+        <ProtectedRoute allowedRoles={[ROLES.ADMIN]}>
+          <ManagementRoutes />
+        </ProtectedRoute>
       } />
       
-      {/* 🌟 مسار المالك الجديد (محمي للمالك فقط) */}
-      <Route path="/owner/*" element={
-        <ProtectedRoute allowedRoles={['owner']}><ManagementRoutes /></ProtectedRoute>
-      } />
-      
-      <Route path="*" element={<Navigate to="/" />} />
+      {/* أي مسار غير معروف يوجه لصفحة الدخول */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

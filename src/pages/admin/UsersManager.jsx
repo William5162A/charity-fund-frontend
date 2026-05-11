@@ -1,25 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from '../../components/layout/Sidebar';
+import { fetchUsers, createUser, updateUser, deleteUserApi } from '../../services/api';
+import { formatDate } from '../../utils/formatters';
+import { ROLES } from '../../context/AuthContext'; // 🌟 استيراد القاموس المركزي لضمان التطابق
 
 export default function UsersManager() {
-  // جلب المستخدمين من الذاكرة أو وضع الافتراضيين
-  const [users, setUsers] = useState(() => {
-    const saved = localStorage.getItem('system_users');
-    if (saved) return JSON.parse(saved);
-    const defaultUsers = [
-      { id: 1, name: 'المالك العام', username: 'owner', password: '123', role: 'owner' },
-      { id: 2, name: 'أدمن الإدارة', username: 'admin', password: '123', role: 'admin' },
-      { id: 3, name: 'الدكتور المعالج', username: 'doctor', password: '123', role: 'doctor' }
-    ];
-    localStorage.setItem('system_users', JSON.stringify(defaultUsers));
-    return defaultUsers;
-  });
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const [formData, setFormData] = useState({ id: null, name: '', username: '', password: '', role: 'admin' });
+  // 🌟 القيمة الافتراضية أصبحت للجنة الإدارية باستخدام القاموس الموحد
+  const [formData, setFormData] = useState({ id: null, full_name: '', email: '', password: '', role: ROLES.PROCESSOR });
   const [isEditing, setIsEditing] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
-
-  // 🌟 State جديد لإدارة نافذة تأكيد الحذف المخصصة
+  
   const [deleteModal, setDeleteModal] = useState({ show: false, userId: null, userName: '', userRole: '' });
 
   const showNotification = (message, type = 'success') => {
@@ -27,79 +21,114 @@ export default function UsersManager() {
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
   };
 
-  const saveToStorage = (updatedUsers) => {
-    setUsers(updatedUsers);
-    localStorage.setItem('system_users', JSON.stringify(updatedUsers));
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchUsers();
+      setUsers(data);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
 
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const isDuplicate = users.some(u => u.username === formData.username && u.id !== formData.id);
-    if (isDuplicate) {
-      showNotification('اسم المستخدم (Username) موجود مسبقاً!', 'error');
-      return;
-    }
+    
+    try {
+      const payload = {
+        email: formData.email.trim(),
+        full_name: formData.full_name.trim(),
+        role: formData.role
+      };
 
-    if (isEditing) {
-      const updatedUsers = users.map(u => u.id === formData.id ? formData : u);
-      saveToStorage(updatedUsers);
-      showNotification('تم تحديث بيانات المستخدم بنجاح!');
-    } else {
-      const newId = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1;
-      const newUser = { ...formData, id: newId };
-      saveToStorage([...users, newUser]);
-      showNotification('تم إضافة المستخدم الجديد بنجاح!');
+      if (formData.password) {
+        payload.password = formData.password;
+      }
+
+      if (isEditing) {
+        await updateUser(formData.id, payload);
+        showNotification('تم تحديث بيانات المستخدم بنجاح!');
+      } else {
+        if (!formData.password) {
+          showNotification('كلمة المرور مطلوبة لإنشاء حساب جديد!', 'error');
+          return;
+        }
+        await createUser(payload);
+        showNotification('تم إضافة المستخدم الجديد بنجاح!');
+      }
+      
+      await loadUsers();
+      resetForm();
+    } catch (err) {
+      showNotification(err.message, 'error');
     }
-    resetForm();
   };
 
   const editUser = (user) => {
-    if (user.role === 'owner') {
-      showNotification('لا يمكن تعديل بيانات المالك العام!', 'error');
+    // 🌟 حماية مدير النظام باستخدام المرجع المركزي
+    if (user.role === ROLES.ADMIN) {
+      showNotification('لا يمكن تعديل بيانات مدير النظام من هذه الشاشة!', 'error');
       return;
     }
-    setFormData(user);
+    
+    setFormData({ 
+      id: user.id, 
+      full_name: user.full_name, 
+      email: user.email, 
+      password: '', 
+      role: user.role 
+    });
     setIsEditing(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // 🌟 تعديل دالة deleteUser لفتح النافذة المخصصة بدلاً من alert المتصفح
   const deleteUser = (id, role, name) => {
-    if (role === 'owner') {
-      showNotification('لا يمكن حذف حساب المالك العام!', 'error');
+    // 🌟 حماية مدير النظام من الحذف
+    if (role === ROLES.ADMIN) {
+      showNotification('لا يمكن حذف حساب مدير النظام!', 'error');
       return;
     }
-    // فتح النافذة وتخزين بيانات المستخدم المراد حذفه
     setDeleteModal({ show: true, userId: id, userName: name, userRole: role });
   };
 
-  // 🌟 دالة جديدة لإتمام عملية الحذف الفعلية من داخل النافذة
-  const confirmDelete = () => {
-    const updatedUsers = users.filter(u => u.id !== deleteModal.userId);
-    saveToStorage(updatedUsers);
-    showNotification(`تم حذف حساب "${deleteModal.userName}" بنجاح!`);
-    closeDeleteModal(); // إغلاق النافذة بعد الحذف
+  const confirmDelete = async () => {
+    try {
+      await deleteUserApi(deleteModal.userId);
+      showNotification(`تم حذف حساب "${deleteModal.userName}" بنجاح!`);
+      closeDeleteModal();
+      loadUsers();
+    } catch (err) {
+      showNotification(err.message, 'error');
+      closeDeleteModal();
+    }
   };
 
-  // 🌟 دالة جديدة لإغلاق نافذة الحذف دون فعل شيء
   const closeDeleteModal = () => {
     setDeleteModal({ show: false, userId: null, userName: '', userRole: '' });
   };
 
   const resetForm = () => {
-    setFormData({ id: null, name: '', username: '', password: '', role: 'admin' });
+    setFormData({ id: null, full_name: '', email: '', password: '', role: ROLES.PROCESSOR });
     setIsEditing(false);
   };
 
+  // 🌟 تحديث المسميات لتطابق البنية الجديدة
   const getRoleName = (role) => {
     switch(role) {
-      case 'owner': return 'مالك النظام';
-      case 'admin': return 'إداري (لجنة)';
-      case 'doctor': return 'طبيب معالج';
+      case ROLES.ADMIN: return 'مدير النظام';
+      case ROLES.PROCESSOR: return 'لجنة إدارية';
+      case ROLES.DOCTOR: return 'طبيب معالج';
       default: return role;
     }
   };
@@ -108,7 +137,6 @@ export default function UsersManager() {
     <div className="flex bg-gray-50 min-h-screen relative" dir="rtl">
       <Sidebar />
 
-      {/* التوست الافتراضي للإشعارات السريعة */}
       {toast.show && (
         <div className={`fixed top-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-xl z-50 flex items-center gap-3 text-white font-bold transition-all duration-300 ${toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'}`}>
           <span className="text-xl">{toast.type === 'error' ? '⚠️' : '✅'}</span>
@@ -116,59 +144,46 @@ export default function UsersManager() {
         </div>
       )}
 
-      {/* 🌟 🔴 نافذة تأكيد الحذف المخصصة (Modal) - تظهر فوق كل شيء 🔴 🌟 */}
       {deleteModal.show && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-100 flex items-center justify-center p-4 animate-fadeIn">
-          {/* محتوى النافذة */}
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 transition-all transform scale-100 relative overflow-hidden border-t-8 border-red-600">
-            
-            {/* أيقونة تحذير خلفية كبيرة باهتة لجمالية التصميم */}
             <div className="absolute -top-10 -right-10 text-red-50 opacity-50 text-9xl">⚠️</div>
-            
             <div className="relative z-10 text-center">
-              {/* أيقونة تحذير علوية */}
               <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-100 mb-6 border-4 border-red-200">
                 <span className="text-red-600 text-4xl">⚠️</span>
               </div>
-              
               <h3 className="text-2xl font-black text-gray-800 mb-2">هل أنت متأكد؟</h3>
               <p className="text-gray-600 mb-6">
-                أنت على وشك حذف حساب <span className="font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded">{deleteModal.userName}</span> ({getRoleName(deleteModal.userRole)}) نهائياً من النظام. لا يمكن التراجع عن هذا الإجراء.
+                أنت على وشك حذف حساب <span className="font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded">{deleteModal.userName}</span> ({getRoleName(deleteModal.userRole)}) نهائياً من الخادم.
               </p>
-              
-              {/* أزرار الإجراءات */}
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <button 
                   onClick={confirmDelete}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-red-200 transition-all flex items-center justify-center gap-2"
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-red-200 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   ❌ نعم، احذفه الآن
                 </button>
                 <button 
                   onClick={closeDeleteModal}
-                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl transition-colors"
+                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl transition-colors cursor-pointer"
                 >
                   إلغاء
                 </button>
               </div>
             </div>
-
-            {/* زر إغلاق صغير في الزاوية */}
-            <button onClick={closeDeleteModal} className="absolute top-4 left-4 text-gray-400 hover:text-gray-600 text-2xl outline-none">×</button>
           </div>
         </div>
       )}
 
-      <div className="flex-1 p-6 md:p-10 w-full overflow-y-auto">
+      <div className="flex-1 p-6 lg:p-10 w-full overflow-y-auto">
         <div className="mb-8 border-b border-gray-200 pb-4">
           <h2 className="text-3xl font-bold text-gray-800">إدارة حسابات النظام</h2>
-          <p className="text-gray-500 mt-2">قم بإنشاء وتعديل حسابات الأطباء وأعضاء اللجنة الإدارية وإدارة صلاحياتهم.</p>
+          <p className="text-gray-500 mt-2 font-bold">إدارة فعلية للمستخدمين المسجلين في قاعدة بيانات الخادم.</p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
           
-          {/* نموذج الإضافة / التعديل */}
-          <div className="lg:col-span-1">
+          <div className="xl:col-span-1">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 sticky top-10">
               <h3 className="text-lg font-bold text-blue-800 mb-6 border-b pb-2">
                 {isEditing ? '✏️ تعديل بيانات المستخدم' : '➕ إضافة مستخدم جديد'}
@@ -176,31 +191,44 @@ export default function UsersManager() {
               
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">الاسم الكامل (الظاهر)</label>
-                  <input required type="text" name="name" value={formData.name} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none" placeholder="مثال: د. أحمد" />
+                  <label className="block text-sm font-bold text-gray-700 mb-1">الاسم الكامل (full_name)</label>
+                  <input required type="text" name="full_name" value={formData.full_name} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none" placeholder="مثال: د. أحمد" />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">اسم المستخدم (للدخول)</label>
-                  <input required type="text" name="username" value={formData.username} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none" dir="ltr" placeholder="مثال: ahmed_doc" />
+                  <label className="block text-sm font-bold text-gray-700 mb-1">البريد الإلكتروني (email)</label>
+                  <input required type="email" name="email" value={formData.email} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none" dir="ltr" placeholder="example@domain.com" />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">كلمة المرور</label>
-                  <input required type="text" name="password" value={formData.password} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none" dir="ltr" placeholder="******" />
+                  <label className="block text-sm font-bold text-gray-700 mb-1">
+                    كلمة المرور 
+                    {isEditing && <span className="text-xs text-orange-500 mr-2">(اتركها فارغة إذا لم ترد تغييرها)</span>}
+                  </label>
+                  <input 
+                    type="text" 
+                    name="password" 
+                    value={formData.password} 
+                    onChange={handleInputChange} 
+                    className="w-full border border-gray-300 p-2.5 rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none" 
+                    dir="ltr" 
+                    placeholder="******" 
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">نوع الصلاحية</label>
-                  <select required name="role" value={formData.role} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none font-bold">
-                    <option value="admin">إداري (لجنة الصندوق)</option>
-                    <option value="doctor">طبيب (رفع طلبات فقط)</option>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">الصلاحية (role)</label>
+                  <select required name="role" value={formData.role} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none font-bold">
+                    {/* 🌟 استخدام القاموس هنا لضمان الإرسال الدقيق للباك إند */}
+                    <option value={ROLES.ADMIN}>مدير نظام (Admin)</option>
+                    <option value={ROLES.PROCESSOR}>لجنة إدارية (Processor)</option>
+                    <option value={ROLES.DOCTOR}>طبيب (Doctor)</option>
                   </select>
                 </div>
                 
                 <div className="pt-4 flex gap-2">
-                  <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg shadow-md transition-colors">
+                  <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl shadow-md transition-colors cursor-pointer">
                     {isEditing ? 'حفظ التعديلات' : 'إنشاء الحساب'}
                   </button>
                   {isEditing && (
-                    <button type="button" onClick={resetForm} className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2.5 px-4 rounded-lg transition-colors">
+                    <button type="button" onClick={resetForm} className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2.5 px-4 rounded-xl transition-colors cursor-pointer">
                       إلغاء
                     </button>
                   )}
@@ -209,63 +237,71 @@ export default function UsersManager() {
             </div>
           </div>
 
-          {/* جدول المستخدمين */}
-          <div className="lg:col-span-2">
+          <div className="xl:col-span-2">
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="bg-gray-50 p-4 border-b border-gray-100">
-                <h3 className="font-bold text-gray-800">الحسابات المسجلة في النظام ({users.length})</h3>
+              <div className="bg-gray-50 p-5 border-b border-gray-100 flex justify-between items-center">
+                <h3 className="font-bold text-gray-800 text-lg">الحسابات المسجلة في الخادم ({users.length})</h3>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-right border-collapse">
-                  <thead>
-                    <tr className="text-sm text-gray-500 border-b border-gray-100">
-                      <th className="p-4 font-bold">الاسم</th>
-                      <th className="p-4 font-bold">اسم الدخول</th>
-                      <th className="p-4 font-bold">الصلاحية</th>
-                      <th className="p-4 font-bold text-center">كلمة السر</th>
-                      <th className="p-4 font-bold text-center">إجراءات</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.map(user => (
-                      <tr key={user.id} className="border-b border-gray-50 hover:bg-blue-50/50 transition-colors">
-                        <td className="p-4 font-bold text-gray-800">{user.name}</td>
-                        <td className="p-4 text-gray-600 font-mono" dir="ltr">{user.username}</td>
-                        <td className="p-4">
-                          <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                            user.role === 'owner' ? 'bg-purple-100 text-purple-700' :
-                            user.role === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
-                          }`}>
-                            {getRoleName(user.role)}
-                          </span>
-                        </td>
-                        <td className="p-4 text-center text-gray-400 font-mono">
-                          {user.role === 'owner' ? '***' : user.password}
-                        </td>
-                        <td className="p-4 text-center">
-                          <div className="flex justify-center gap-2">
-                            <button 
-                              onClick={() => editUser(user)}
-                              disabled={user.role === 'owner'}
-                              className={`px-3 py-1 rounded text-xs font-bold transition-colors ${user.role === 'owner' ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`}
-                            >
-                              تعديل
-                            </button>
-                            {/* 🌟 تعديل هنا لتمرير اسم المستخدم أيضاً لدالة الحذف */}
-                            <button 
-                              onClick={() => deleteUser(user.id, user.role, user.name)}
-                              disabled={user.role === 'owner'}
-                              className={`px-3 py-1 rounded text-xs font-bold transition-colors ${user.role === 'owner' ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
-                            >
-                              حذف
-                            </button>
-                          </div>
-                        </td>
+              
+              {loading ? (
+                <div className="p-16 flex flex-col items-center justify-center">
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : error ? (
+                <div className="p-10 text-center text-red-600 font-bold">⚠️ {error}</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right border-collapse min-w-[600px]">
+                    <thead>
+                      <tr className="text-sm text-gray-500 border-b border-gray-100 bg-white">
+                        <th className="p-4 font-bold whitespace-nowrap">الاسم</th>
+                        <th className="p-4 font-bold whitespace-nowrap">البريد الإلكتروني</th>
+                        <th className="p-4 font-bold whitespace-nowrap">الصلاحية</th>
+                        <th className="p-4 font-bold text-center whitespace-nowrap">تاريخ الإنشاء</th>
+                        <th className="p-4 font-bold text-center whitespace-nowrap">إجراءات</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {users.map(user => (
+                        <tr key={user.id} className="border-b border-gray-50 hover:bg-blue-50/50 transition-colors">
+                          <td className="p-4 font-bold text-gray-800">{user.full_name}</td>
+                          <td className="p-4 text-gray-600 font-mono" dir="ltr">{user.email}</td>
+                          <td className="p-4">
+                            {/* 🌟 التلوين الذكي بناءً على المرجع المركزي */}
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap border ${
+                              user.role === ROLES.ADMIN ? 'bg-purple-100 text-purple-700 border-purple-200' :
+                              user.role === ROLES.PROCESSOR ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                            }`}>
+                              {getRoleName(user.role)}
+                            </span>
+                          </td>
+                          <td className="p-4 text-center text-gray-500 text-xs font-bold whitespace-nowrap">
+                            {user.created_at ? formatDate(user.created_at) : 'غير متوفر'}
+                          </td>
+                          <td className="p-4 text-center">
+                            <div className="flex justify-center gap-2">
+                              <button 
+                                onClick={() => editUser(user)}
+                                disabled={user.role === ROLES.ADMIN}
+                                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${user.role === ROLES.ADMIN ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 cursor-pointer'}`}
+                              >
+                                ✏️ تعديل
+                              </button>
+                              <button 
+                                onClick={() => deleteUser(user.id, user.role, user.full_name)}
+                                disabled={user.role === ROLES.ADMIN}
+                                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${user.role === ROLES.ADMIN ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white border border-red-200 text-red-600 hover:bg-red-50 cursor-pointer'}`}
+                              >
+                                🗑️ حذف
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
 

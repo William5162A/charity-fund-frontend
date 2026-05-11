@@ -1,22 +1,24 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
+import { useAuth, ROLES } from '../../context/AuthContext';
 
 export default function Sidebar() {
   const navigate = useNavigate();
-  const userRole = localStorage.getItem('userRole');
-  const userName = localStorage.getItem('userName') || 'مستخدم النظام';
+  const { user, logout } = useAuth();
 
-  // 🌟 تحديد البادئة بناءً على الصلاحية
-  const basePath = userRole === 'owner' ? '/owner' : '/admin';
+  if (!user) return null;
 
-  // دالة تسجيل الخروج الذكية (لا تمسح قاعدة البيانات)
+  const userRole = user.role;
+  const userName = user.name || 'مستخدم النظام';
+
+  // 🌟 تصحيح البادئة لتطابق المسارات الجديدة تماماً
+  const basePath = userRole === ROLES.ADMIN ? '/admin' : '/processor';
+
   const handleLogout = () => {
-    localStorage.removeItem('userRole');
-    localStorage.removeItem('userName');
-    navigate('/');
+    logout();
+    navigate('/', { replace: true });
   };
 
-  // تنسيق الروابط العادية (أزرق)
   const navLinkStyle = ({ isActive }) => 
     `flex items-center gap-3 px-4 py-3 rounded-lg font-bold transition-all ${
       isActive 
@@ -24,8 +26,7 @@ export default function Sidebar() {
         : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
     }`;
 
-  // تنسيق روابط المالك (بنفسجي)
-  const ownerLinkStyle = ({ isActive }) => 
+  const adminLinkStyle = ({ isActive }) => 
     `flex items-center gap-3 px-4 py-3 rounded-lg font-bold transition-all ${
       isActive 
         ? 'bg-purple-50 text-purple-700 border-r-4 border-purple-700' 
@@ -33,29 +34,26 @@ export default function Sidebar() {
     }`;
 
   return (
-    <aside className="w-64 bg-white shadow-xl h-screen sticky top-0 overflow-y-auto flex-col hidden md:flex border-l border-gray-100">
+    <aside className="w-64 bg-white shadow-xl h-screen sticky top-0 overflow-y-auto flex-col hidden lg:flex border-l border-gray-100">
       
-      {/* رأس القائمة: معلومات المستخدم */}
       <div className="p-6 border-b border-gray-100">
         <div className="flex items-center gap-3">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl shadow-inner ${userRole === 'owner' ? 'bg-purple-100' : 'bg-blue-100'}`}>
-            {userRole === 'owner' ? '👑' : '👨‍💻'}
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl shadow-inner ${userRole === ROLES.ADMIN ? 'bg-purple-100' : 'bg-blue-100'}`}>
+            {userRole === ROLES.ADMIN ? '👑' : '👨‍💻'}
           </div>
           <div>
             <p className="font-black text-gray-800 text-sm">{userName}</p>
             <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-              {userRole === 'owner' ? 'المالك العام' : 'فريق الإدارة'}
+              {userRole === ROLES.ADMIN ? 'مدير النظام' : 'اللجنة الإدارية'}
             </p>
           </div>
         </div>
       </div>
 
-      {/* الروابط الديناميكية */}
       <nav className="p-4 flex flex-col gap-2 grow">
         <p className="text-[11px] font-black text-gray-400 mb-2 px-2 mt-2 uppercase">العمليات الأساسية</p>
         
-        {/* نستخدم ${basePath} لضمان بقاء المستخدم في مساره الصحيح */}
-        <NavLink path to={`${basePath}`} end className={navLinkStyle}>
+        <NavLink to={`${basePath}`} end className={navLinkStyle}>
           <span className="text-xl">📊</span> الرئيسية
         </NavLink>
         
@@ -77,25 +75,24 @@ export default function Sidebar() {
           <span className="text-xl">📈</span> التقارير المالية
         </NavLink>
 
-        {/* قسم خاص بالمالك فقط ويستخدم مسار /owner */}
-        {userRole === 'owner' && (
+        {/* 🌟 تعديل الروابط المباشرة للمدير لتطابق مسار /admin بدلاً من /owner */}
+        {userRole === ROLES.ADMIN && (
           <>
             <p className="text-[11px] font-black text-purple-400 mt-6 mb-2 px-2 uppercase">إدارة النظام</p>
-            <NavLink to="/owner/users" className={ownerLinkStyle}>
+            <NavLink to="/admin/users" className={adminLinkStyle}>
               <span className="text-xl">⚙️</span> إدارة الحسابات
             </NavLink>
-            <NavLink to="/owner/supporters-manager" className={ownerLinkStyle}>
+            <NavLink to="/admin/supporters-manager" className={adminLinkStyle}>
               <span className="text-xl">🏢</span> إدارة قوائم الجهات
             </NavLink>
           </>
         )}
       </nav>
 
-      {/* زر تسجيل الخروج في الأسفل */}
       <div className="p-4 border-t border-gray-100">
         <button 
           onClick={handleLogout}
-          className="w-full flex items-center justify-center gap-2 bg-red-50 text-red-600 py-3 rounded-xl font-bold hover:bg-red-600 hover:text-white transition-all duration-300 shadow-sm"
+          className="w-full flex items-center justify-center gap-2 bg-red-50 text-red-600 py-3 rounded-xl font-bold hover:bg-red-600 hover:text-white transition-all duration-300 shadow-sm cursor-pointer"
         >
           <span>🚪</span> تسجيل الخروج
         </button>
