@@ -11,7 +11,6 @@ const api = axios.create({
   },
 });
 
-// Interceptor 1: حقن الـ Access Token تلقائياً في كل طلب مرسل للباك إند
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('access_token');
@@ -23,13 +22,11 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Interceptor 2: التقاط خطأ 401 وتجديد الـ Token تلقائياً دون إزعاج المستخدم
 api.interceptors.response.use(
-  (response) => response, // تمرير الاستجابة الناجحة
+  (response) => response, 
   async (error) => {
     const originalRequest = error.config;
 
-    // التحقق من أن الخطأ 401 (انتهاء الصلاحية) وأنه لم يتم محاولة التجديد مسبقاً لهذا الطلب
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
@@ -40,18 +37,14 @@ api.interceptors.response.use(
           throw new Error('لا يوجد مفتاح تجديد');
         }
 
-        // نستخدم axios الخام هنا لتجنب الحلقة اللانهائية مع المعترض الخاص بنا
         const res = await axios.post(`${BASE_URL}token/refresh/`, { refresh: refreshToken });
         
-        // حفظ المفتاح الجديد
         localStorage.setItem('access_token', res.data.access);
         
-        // تحديث ترويسة الطلب الأصلي بالمفتاح الجديد وإعادة إرساله
         originalRequest.headers.Authorization = `Bearer ${res.data.access}`;
         return api(originalRequest);
 
       } catch (refreshError) {
-        // فشل التجديد (انتهت صلاحية الـ refresh token أيضاً) -> تنظيف الذاكرة وتوجيه لشاشة الدخول
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('userRole');
@@ -65,84 +58,57 @@ api.interceptors.response.use(
 );
 
 
-// --------------------------------------------------------
-// نقطة النهاية (Endpoints) الخاصة بالمصادقة (Authentication)
-// --------------------------------------------------------
-
 export const loginUser = async (email, password) => {
   try {
     const response = await api.post('token/', { email, password });
-    
-    // حفظ الـ Tokens في الذاكرة المحلية
     localStorage.setItem('access_token', response.data.access);
     localStorage.setItem('refresh_token', response.data.refresh);
-    
     return response.data;
   } catch (error) {
-    // إرجاع رسالة الخطأ القادمة من الباك إند أو رسالة عامة
     const errorMessage = error.response?.data?.detail || 'فشل الاتصال بالخادم. تأكد من صحة البيانات.';
     throw new Error(errorMessage);
   }
 };
 
 
-// جلب قائمة الطلبات الطبية
 export const fetchAidRequests = async () => {
   try {
     const response = await api.get('aid-requests/requests/');
-    // استخراج مصفوفة البيانات من كائن الفهرسة (Pagination)
     return response.data.results || [];
   } catch (error) {
     throw new Error(error.response?.data?.detail || 'فشل جلب بيانات الطلبات من الخادم');
   }
 };
 
-
-// ==========================================
-// دوال صفحة تفاصيل الطلب (Request Details)
-// ==========================================
-
-// 1. جلب تفاصيل الطلب الأساسية
 export const fetchAidRequestDetails = async (id) => {
   const response = await api.get(`aid-requests/requests/${id}/`);
   return response.data;
 };
 
-// 2. تحديث حالة الطلب (Decision Panel)
 export const updateRequestStatus = async (id, status) => {
   const response = await api.patch(`aid-requests/requests/${id}/`, { request_status: status });
   return response.data;
 };
 
-// 3. جلب بيانات المريض المرتبط بالطلب
 export const fetchPatientDetails = async (patientId) => {
   const response = await api.get(`patients/${patientId}/`);
   return response.data;
 };
 
-// 4. جلب أفراد عائلة المريض
 export const fetchPatientFamily = async (patientId) => {
   const response = await api.get(`patients/${patientId}/family/`);
   return response.data;
 };
 
-// 5. جلب قائمة الجهات الداعمة المتاحة في النظام (للقائمة المنسدلة)
 export const fetchAllProviders = async () => {
   const response = await api.get('aid-providers/providers/');
-  // الباك إند يُرجع الفهرسة (Pagination)، نستخرج النتائج
   return response.data.results || response.data; 
 };
 
-// 6. إضافة مساهمة (ربط جهة داعمة بالطلب)
 export const assignProviderToRequest = async (requestId, providerData) => {
   const response = await api.post(`aid-requests/requests/${requestId}/providers/`, providerData);
   return response.data;
 };
-
-
-// ==========================================
-// دوال إدارة المستخدمين (Users Management)
-// ==========================================
 
 export const fetchUsers = async () => {
   try {
@@ -158,7 +124,6 @@ export const createUser = async (userData) => {
     const response = await api.post('users/', userData);
     return response.data;
   } catch (error) {
-    // جلب رسائل الخطأ التفصيلية من Django (مثل: الإيميل موجود مسبقاً)
     const errData = error.response?.data;
     const errorMsg = errData ? Object.values(errData).flat().join(' | ') : 'فشل إنشاء المستخدم';
     throw new Error(errorMsg);
@@ -187,16 +152,57 @@ export const deleteUserApi = async (id) => {
 
 
 // ==========================================
-// دوال إدخال البيانات المتسلسلة (Doctor Form)
+// 🌟 دوال واجهة الطبيب الجديدة (EMR System)
 // ==========================================
 
+// استبدل الدالة القديمة بهذه:
+export const searchPatients = async (query, signal) => {
+  try {
+    // نعتمد على معيار Django القياسي ?search= للبحث في الحروف أو الأرقام
+    const response = await api.get(`patients/?search=${query}`, { signal });
+    return response.data.results || response.data;
+  } catch (error) {
+    if (error.name === 'CanceledError') return []; // تجاهل الخطأ إذا تم إلغاء الطلب عمداً
+    throw new Error('فشل البحث في قاعدة بيانات المرضى.');
+  }
+};
+
+// 2. جلب تاريخ طلبات مريض محدد (للإحصائيات)
+// 2. جلب تاريخ طلبات مريض محدد (مع درع فلترة صارم)
+export const fetchRequestsByPatientId = async (patientId) => {
+  try {
+    const response = await api.get(`aid-requests/requests/?patient=${patientId}`);
+    const results = response.data.results || response.data;
+    
+    // 🌟 الدرع المعماري: فلترة النتائج إجبارياً في الفرونت إند لأن الباك إند يرسل كل شيء
+    const strictResults = results.filter(req => 
+      // نتحقق مما إذا كان الباك إند يرسل المريض كرقم (ID) أو ككائن (Object)
+      req.patient === patientId || req.patient?.id === patientId
+    );
+    
+    return strictResults;
+  } catch (error) {
+    console.error('فشل جلب تاريخ المريض:', error);
+    return []; // نعيد مصفوفة فارغة كي لا يتعطل النظام
+  }
+};
+
 export const createPatient = async (patientData) => {
-  const response = await api.post('patients/', patientData);
-  return response.data; // سيعيد بيانات المريض متضمنة الـ id
+  try {
+    const response = await api.post('patients/', patientData);
+    return response.data; 
+  } catch (error) {
+    const errData = error.response?.data;
+    // التقاط خطأ التكرار (Unique Constraint) بشكل دقيق
+    if (errData?.national_number) {
+      throw new Error('الرقم الوطني موجود مسبقاً في النظام. يرجى البحث عن المريض بدلاً من إضافته.');
+    }
+    const errorMsg = errData ? Object.values(errData).flat().join(' | ') : 'فشل إنشاء ملف المريض';
+    throw new Error(errorMsg);
+  }
 };
 
 export const createFamilyMember = async (patientId, memberData) => {
-  // بناءً على هيكلية الباك إند القياسية لـ Django
   const response = await api.post(`patients/${patientId}/family/`, memberData);
   return response.data;
 };
@@ -205,11 +211,6 @@ export const createAidRequest = async (requestData) => {
   const response = await api.post('aid-requests/requests/', requestData);
   return response.data;
 };
-
-
-// ==========================================
-// دوال إدارة الجهات الداعمة (Aid Providers)
-// ==========================================
 
 export const createProvider = async (providerData) => {
   const response = await api.post('aid-providers/providers/', providerData);
@@ -223,6 +224,23 @@ export const updateProvider = async (id, providerData) => {
 
 export const deleteProvider = async (id) => {
   const response = await api.delete(`aid-providers/providers/${id}/`);
+  return response.data;
+};
+
+// --- دوال إدارة تصنيفات الجهات الداعمة (Categories) ---
+export const fetchCategories = async (signal) => {
+  const response = await api.get('aid-providers/categories/', { signal });
+  return response.data.results || response.data;
+};
+
+export const createCategory = async (categoryData) => {
+  const response = await api.post('aid-providers/categories/', categoryData);
+  return response.data;
+};
+
+// حذف مساهمة مالية (جهة داعمة) من طلب طبي
+export const removeProviderFromRequest = async (contributionId) => {
+  const response = await api.delete(`aid-requests/providers/${contributionId}/`);
   return response.data;
 };
 

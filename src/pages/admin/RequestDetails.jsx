@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/layout/Sidebar';
+import ConfirmModal from '../../components/ui/ConfirmModal'; // 🌟 استيراد نافذة التأكيد
 import { formatCurrency, formatDate, isPastDate } from '../../utils/formatters'; 
 import { 
   fetchAidRequestDetails, 
@@ -8,7 +9,8 @@ import {
   fetchPatientFamily,
   updateRequestStatus,
   fetchAllProviders,
-  assignProviderToRequest
+  assignProviderToRequest,
+  removeProviderFromRequest // 🌟 الدالة الجديدة
 } from '../../services/api';
 
 export default function RequestDetails() {
@@ -24,15 +26,17 @@ export default function RequestDetails() {
   const [familyData, setFamilyData] = useState([]);
   const [availableProviders, setAvailableProviders] = useState([]);
   
-  // الاحتفاظ بالصندوق العام محلياً لحين توفر API خاص به
   const [fundBalance, setFundBalance] = useState(() => Number(localStorage.getItem('general_fund')) || 100000);
+
+  // 🌟 حالات الحذف
+  const [deleteContribModal, setDeleteContribModal] = useState({ isOpen: false, id: null, name: '' });
+  const [isDeletingContrib, setIsDeletingContrib] = useState(false);
 
   const showNotification = (message, type = 'success') => {
     setToast({ show: true, message, type });
-    setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
+    setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 4000);
   };
 
-  // 🌟 استخدام AbortController للمعالجة النظيفة للذاكرة
   useEffect(() => {
     const abortController = new AbortController();
     
@@ -49,7 +53,7 @@ export default function RequestDetails() {
           const [patData, famData, provData] = await Promise.all([
             fetchPatientDetails(reqData.patient),
             fetchPatientFamily(reqData.patient),
-            fetchAllProviders()
+            fetchAllProviders(abortController.signal)
           ]);
           
           if (abortController.signal.aborted) return;
@@ -68,10 +72,7 @@ export default function RequestDetails() {
     };
 
     loadFullDetails();
-    
-    return () => { 
-      abortController.abort(); // 🌟 تدمير الطلبات المعلقة عند الخروج من الصفحة
-    };
+    return () => abortController.abort();
   }, [id]);
 
   const handleStatusChange = async (newStatus) => {
@@ -85,8 +86,16 @@ export default function RequestDetails() {
   };
 
   const estimatedTotalCost = Number(requestData?.estimated_cost || 0);
-  const totalContributed = requestData?.providers?.reduce((sum, item) => sum + Number(item.aid_amount), 0) || 0;
-  const surplusAmount = totalContributed - estimatedTotalCost;
+
+  const totalContributed = requestData?.providers?.reduce((sum, item) => {
+    const amount = Number(item.aid_amount);
+    if (item.type_of_aid_amount === 'percentage') {
+      return sum + ((amount / 100) * estimatedTotalCost);
+    }
+    return sum + amount;
+  }, 0) || 0;
+
+  const isFullyFunded = totalContributed >= estimatedTotalCost && estimatedTotalCost > 0;
 
   const STATUS_MAP = {
     'pending': 'قيد الدراسة',
@@ -100,8 +109,7 @@ export default function RequestDetails() {
 
   const handleAddContribution = async () => {
     if (!contribData.providerId || !contribData.amount) {
-      showNotification('الرجاء إدخال الجهة الداعمة والمبلغ', 'error');
-      return;
+      return showNotification('الرجاء إدخال الجهة الداعمة والمبلغ', 'error');
     }
 
     try {
@@ -119,12 +127,44 @@ export default function RequestDetails() {
       const updatedReq = await fetchAidRequestDetails(id);
       setRequestData(updatedReq);
       
-      showNotification('تمت إضافة المساهمة بنجاح');
+      const newTotal = updatedReq.providers?.reduce((sum, item) => {
+        const amount = Number(item.aid_amount);
+        if (item.type_of_aid_amount === 'percentage') {
+          return sum + ((amount / 100) * estimatedTotalCost);
+        }
+        return sum + amount;
+      }, 0) || 0;
+
+      if (newTotal >= estimatedTotalCost) {
+        showNotification('🎯 نجاح: تم جمع كامل المبلغ المطلوب للطلب الطـبي!', 'success');
+      } else {
+        showNotification('تمت إضافة المساهمة بنجاح');
+      }
+      
       setShowContributionForm(false);
       setContribData({ providerId: '', amount: '', type: 'fixed', notes: '' });
       
     } catch (err) {
       showNotification('فشل إضافة المساهمة. تأكد من البيانات.', 'error');
+    }
+  };
+
+  // 🌟 معالجة الحذف
+  const executeDeleteContribution = async () => {
+    setIsDeletingContrib(true);
+    try {
+      await removeProviderFromRequest(deleteContribModal.id);
+      
+      // تحديث البيانات من الخادم لضمان دقة العمليات الحسابية
+      const updatedReq = await fetchAidRequestDetails(id);
+      setRequestData(updatedReq);
+      
+      showNotification(`تم إلغاء مساهمة "${deleteContribModal.name}" بنجاح`);
+      setDeleteContribModal({ isOpen: false, id: null, name: '' });
+    } catch (err) {
+      showNotification('فشل حذف المساهمة.', 'error');
+    } finally {
+      setIsDeletingContrib(false);
     }
   };
 
@@ -160,6 +200,16 @@ export default function RequestDetails() {
     <div className="flex bg-gray-50 min-h-[calc(100vh-68px)] relative" dir="rtl">
       <Sidebar />
 
+      {/* 🌟 نافذة تأكيد حذف المساهمة */}
+      <ConfirmModal 
+        isOpen={deleteContribModal.isOpen}
+        onClose={() => !isDeletingContrib && setDeleteContribModal({ isOpen: false, id: null, name: '' })}
+        onConfirm={executeDeleteContribution}
+        title="إلغاء مساهمة مالية"
+        message={`هل أنت متأكد من إلغاء الدعم المقدم من "${deleteContribModal.name}" لهذا الطلب؟ سيتم خصم المبلغ من الإجمالي فوراً.`}
+        isProcessing={isDeletingContrib}
+      />
+
       {toast.show && (
         <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-xl z-50 flex items-center gap-3 transition-all duration-300 text-white font-bold ${toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'}`}>
           <span className="text-xl">{toast.type === 'error' ? '⚠️' : '✅'}</span>
@@ -169,9 +219,9 @@ export default function RequestDetails() {
 
       <div className="flex-1 p-6 lg:p-10 w-full overflow-y-auto">
         
-        <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-200">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 pb-4 border-b border-gray-200 gap-4">
           <div className="flex flex-col">
-            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-3">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center flex-wrap gap-3">
               تفاصيل الطلب رقم #{requestData.id}
               <span className={`text-sm px-3 py-1 rounded-full font-bold border ${ 
                 currentStatus === 'مكتمل' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 
@@ -181,10 +231,18 @@ export default function RequestDetails() {
               }`}>
                 {isOverdue ? '⚠️ فات الموعد' : currentStatus}
               </span>
+              
+              {isFullyFunded && (
+                <span className="text-sm px-4 py-1 rounded-full font-black border bg-blue-100 text-blue-800 border-blue-300 shadow-sm flex items-center gap-2 animate-pulse">
+                  🎯 تم جمع كامل المبلغ
+                </span>
+              )}
             </h2>
-            <p className="text-xs text-gray-500 mt-1">تاريخ التنفيذ المستهدف: {formatDate(requestData.date_of_aid)}</p>
+            <p className="text-xs text-gray-500 mt-2">تاريخ التنفيذ المستهدف: {formatDate(requestData.date_of_aid)}</p>
           </div>
-          <button onClick={() => navigate(-1)} className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 font-bold cursor-pointer transition-colors hover:-translate-x-1">&rarr; العودة</button>
+          <button onClick={() => navigate(-1)} className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 font-bold cursor-pointer transition-colors hover:-translate-x-1 shrink-0">
+            &rarr; العودة
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -274,19 +332,42 @@ export default function RequestDetails() {
                   <div className="text-center p-4 bg-gray-50 border border-dashed border-gray-200 rounded-xl mb-3 text-xs font-bold text-gray-400">لم يتم ربط جهات داعمة بهذا الطلب.</div>
                 ) : (
                   <div className="space-y-2 mb-4">
-                    {requestData.providers?.map((cont) => (
-                      <div key={cont.id} className="flex justify-between items-center p-3 rounded-xl border text-sm bg-emerald-50 border-emerald-100">
-                        <div>
-                          <span className="font-bold text-emerald-800 block">{cont.provider_name}</span>
-                          {cont.type_of_aid_amount === 'percentage' && <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">نسبة مئوية</span>}
+                    {requestData.providers?.map((cont) => {
+                      const amountRaw = Number(cont.aid_amount);
+                      const isPercentage = cont.type_of_aid_amount === 'percentage';
+                      const calculatedAmount = isPercentage ? ((amountRaw / 100) * estimatedTotalCost) : amountRaw;
+
+                      return (
+                        <div key={cont.id} className="flex justify-between items-center p-3 rounded-xl border text-sm bg-emerald-50 border-emerald-100 group">
+                          <div>
+                            <span className="font-bold text-emerald-800 block">{cont.provider_name}</span>
+                            {isPercentage && <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">تغطية {amountRaw}%</span>}
+                          </div>
+                          
+                          {/* 🌟 زر الحذف يظهر عند التمرير */}
+                          <div className="flex items-center gap-3">
+                            <span className="font-black text-emerald-600">{formatCurrency(calculatedAmount)}</span>
+                            <button 
+                              onClick={() => setDeleteContribModal({ isOpen: true, id: cont.id, name: cont.provider_name })}
+                              className="text-red-500 hover:text-red-700 bg-red-100 hover:bg-red-200 p-1.5 rounded-lg transition-colors cursor-pointer opacity-100 lg:opacity-0 group-hover:opacity-100 shrink-0"
+                              title="إلغاء المساهمة"
+                            >
+                              ❌
+                            </button>
+                          </div>
                         </div>
-                        <span className="font-black text-emerald-600">{formatCurrency(cont.aid_amount)}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
-                {showContributionForm ? (
+                {!isFullyFunded && !showContributionForm && (
+                  <button onClick={() => setShowContributionForm(true)} className="w-full bg-white border-2 border-emerald-500 text-emerald-700 py-2.5 rounded-xl font-bold hover:bg-emerald-50 transition-colors text-sm cursor-pointer mt-2 shadow-sm">
+                    + ربط جهة داعمة جديدة
+                  </button>
+                )}
+
+                {showContributionForm && (
                   <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-3 mt-4 animate-fadeIn">
                     <select 
                       value={contribData.providerId} 
@@ -309,7 +390,7 @@ export default function RequestDetails() {
                         placeholder={contribData.type === 'fixed' ? "المبلغ" : "النسبة"} 
                         value={contribData.amount} 
                         onChange={(e) => setContribData({...contribData, amount: e.target.value})} 
-                        className="w-2/3 border border-gray-300 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-400 font-mono" 
+                        className="w-2/3 border border-gray-300 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-400 font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
                       />
                     </div>
                     
@@ -326,10 +407,6 @@ export default function RequestDetails() {
                       <button onClick={() => setShowContributionForm(false)} className="flex-1 bg-gray-200 text-gray-700 py-2.5 rounded-lg text-sm font-bold hover:bg-gray-300 cursor-pointer">إلغاء</button>
                     </div>
                   </div>
-                ) : (
-                  <button onClick={() => setShowContributionForm(true)} className="w-full bg-white border-2 border-emerald-500 text-emerald-700 py-2.5 rounded-xl font-bold hover:bg-emerald-50 transition-colors text-sm cursor-pointer mt-2 shadow-sm">
-                    + ربط جهة داعمة جديدة
-                  </button>
                 )}
               </div>
 
