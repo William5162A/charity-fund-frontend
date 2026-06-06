@@ -32,7 +32,6 @@ export default function Reports() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [fundBalance, setFundBalance] = useState(0);
   
   const [timeFilter, setTimeFilter] = useState('all');
 
@@ -45,8 +44,7 @@ export default function Reports() {
       setError(null);
 
       try {
-        let data = await fetchAidRequests();
-        const currentFundBalance = Number(localStorage.getItem('general_fund')) || 100000;
+        let data = await fetchAidRequests(abortController.signal);
         
         if (abortController.signal.aborted) return;
 
@@ -97,9 +95,9 @@ export default function Reports() {
           rejectedCount: rejected,
           providerTotals: provTotals
         });
-        setFundBalance(currentFundBalance);
         setLoading(false);
       } catch (err) {
+        if (abortController.signal.aborted || err.name === 'CanceledError') return;
         if (!abortController.signal.aborted) {
           setError(err.message || 'فشل جلب بيانات التقارير');
           setLoading(false);
@@ -167,7 +165,7 @@ export default function Reports() {
           </div>
         ) : (
           <div className="animate-fadeIn">
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
               
               <div className="bg-white p-6 rounded-2xl shadow-sm border-r-4 border-blue-600 hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start">
@@ -205,7 +203,7 @@ export default function Reports() {
                     </div>
                     <div className="bg-cyan-50 p-2 rounded-lg text-cyan-600 text-xl">📈</div>
                   </div>
-                  <p className="text-xs text-cyan-700 mt-3 font-bold bg-cyan-50 inline-block px-2 py-1 rounded">فائض للترحيل للصندوق العام</p>
+                  <p className="text-xs text-cyan-700 mt-3 font-bold bg-cyan-50 inline-block px-2 py-1 rounded">فائض مالي محقق للفترة</p>
                 </div>
               ) : (
                 <div className="bg-white p-6 rounded-2xl shadow-sm border-r-4 border-amber-500 hover:shadow-md transition-shadow">
@@ -219,17 +217,6 @@ export default function Reports() {
                   <p className="text-xs text-amber-600 mt-3 font-bold bg-amber-50 inline-block px-2 py-1 rounded">مبالغ تحتاج لتغطية عاجلة</p>
                 </div>
               )}
-
-              <div className="bg-linear-to-l from-indigo-50 to-white p-6 rounded-2xl shadow-sm border-r-4 border-indigo-600 hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-sm text-indigo-700 font-bold mb-1">رصيد الصندوق العام</p>
-                    <h3 className="text-2xl font-black text-indigo-900">{formatCurrency(fundBalance)}</h3>
-                  </div>
-                  <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600 text-xl">🏦</div>
-                </div>
-                <p className="text-xs text-indigo-700 mt-3 font-bold bg-indigo-100/50 inline-block px-2 py-1 rounded">إجمالي الرصيد المتاح للتمويل</p>
-              </div>
 
             </div>
 
@@ -261,7 +248,9 @@ export default function Reports() {
                           <td className="p-4 text-emerald-600 font-bold whitespace-nowrap">{formatCurrency(val)}</td>
                           <td className="p-4 text-center">
                             <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-bold border border-blue-100 inline-block whitespace-nowrap">
-                              {((val / stats.totalContributed) * 100).toFixed(1)}%
+                              {stats.totalContributed > 0
+                                ? ((val / stats.totalContributed) * 100).toFixed(1)
+                                : '0.0'}%
                             </span>
                           </td>
                         </tr>

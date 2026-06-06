@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Sidebar from '../../components/layout/Sidebar';
 import { formatCurrency } from '../../utils/formatters';
-import { fetchAidRequests } from '../../services/api';
+import { fetchAidRequests, fetchAllProviders } from '../../services/api'; // 🌟 استيراد دالة جلب الجهات
 
 const FilterTab = ({ value, label, currentFilter, onFilterChange }) => {
   const isActive = currentFilter === value;
@@ -24,11 +24,9 @@ export default function Supporters() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [fundBalance, setFundBalance] = useState(0); 
 
   const [timeFilter, setTimeFilter] = useState('all');
 
-  // 🌟 المعالجة المعمارية الصارمة لدورة الحياة
   useEffect(() => {
     const abortController = new AbortController();
 
@@ -37,12 +35,24 @@ export default function Supporters() {
       setError(null);
 
       try {
-        let requests = await fetchAidRequests();
-        const currentFundBalance = Number(localStorage.getItem('general_fund')) || 100000; 
+        // 🌟 جلب الطلبات وقائمة الجهات المعتمدة معاً بالتوازي لتحسين الأداء
+        const [rawRequests, providersData] = await Promise.all([
+          fetchAidRequests(abortController.signal),
+          fetchAllProviders(abortController.signal)
+        ]);
 
         if (abortController.signal.aborted) return;
 
-        // تطبيق الفلتر الزمني على تاريخ التنفيذ المستهدف
+        // 🌟 بناء القاموس لربط اسم الجهة بالتصنيف
+        const categoryMap = {};
+        providersData.forEach(p => {
+          // التحقق من بنية الباك إند (إذا كان التصنيف كائن أو نص)
+          const catName = p.category?.name || p.category?.title || p.category || 'غير مصنف';
+          categoryMap[p.name] = catName;
+        });
+
+        let requests = rawRequests;
+
         if (timeFilter !== 'all') {
           const cutoffDate = new Date();
           
@@ -54,18 +64,28 @@ export default function Supporters() {
           requests = requests.filter(req => new Date(req.date_of_aid) >= cutoffDate);
         }
 
-        const stats = { "الجهات والمؤسسات المعتمدة": {} };
+        // 🌟 كائن ديناميكي فارغ بدلاً من الثابت
+        const stats = {}; 
 
         requests.forEach(req => {
           if (Array.isArray(req.providers) && req.providers.length > 0) {
             req.providers.forEach(contrib => {
-              const cat = "الجهات والمؤسسات المعتمدة";
               const name = contrib.provider_name;
-              const amount = Number(contrib.aid_amount || 0);
+              
+              // 🌟 استخراج التصنيف من القاموس الذي بنيناه
+              const cat = categoryMap[name] || "جهات غير مصنفة";
+              
+              // 🌟 إصلاح رياضي: حساب القيمة الحقيقية إذا كانت المساهمة نسبة مئوية
+              const amountRaw = Number(contrib.aid_amount || 0);
+              const isPercentage = contrib.type_of_aid_amount === 'percentage';
+              const estimatedCost = Number(req.estimated_cost || 0);
+              const calculatedAmount = isPercentage ? ((amountRaw / 100) * estimatedCost) : amountRaw;
 
-              if (amount > 0) {
+              if (calculatedAmount > 0) {
+                if (!stats[cat]) stats[cat] = {};
                 if (!stats[cat][name]) stats[cat][name] = { totalAmount: 0, casesCount: 0 };
-                stats[cat][name].totalAmount += amount;
+                
+                stats[cat][name].totalAmount += calculatedAmount;
                 stats[cat][name].casesCount += 1;
               }
             });
@@ -73,9 +93,9 @@ export default function Supporters() {
         });
 
         setSupporterStats(stats);
-        setFundBalance(currentFundBalance);
         setLoading(false);
       } catch (err) {
+        if (abortController.signal.aborted || err.name === 'CanceledError') return;
         if (!abortController.signal.aborted) {
           setError(err.message || "فشل جلب بيانات الجهات الداعمة");
           setLoading(false);
@@ -86,7 +106,7 @@ export default function Supporters() {
     loadData();
     
     return () => { 
-      abortController.abort(); // 🌟 حماية الذاكرة وإلغاء الطلبات المتأخرة
+      abortController.abort(); 
     };
   }, [timeFilter]);
 
@@ -111,16 +131,7 @@ export default function Supporters() {
           </div>
           
           <div className="flex flex-col gap-4 w-full xl:w-auto">
-            <div className="flex flex-col lg:flex-row items-center gap-4 justify-between xl:justify-end w-full">
-              
-              <div className="bg-indigo-600 text-white px-5 py-2 rounded-xl shadow-md flex items-center gap-3 w-full lg:w-auto shrink-0">
-                 <span className="text-2xl">🏦</span>
-                 <div>
-                    <p className="text-[10px] font-bold opacity-80 uppercase">رصيد الصندوق العام الحالي</p>
-                    <p className="text-lg font-black">{formatCurrency(fundBalance)}</p>
-                 </div>
-              </div>
-
+            <div className="flex flex-col lg:flex-row items-center gap-4 justify-end w-full">
               <div className="flex items-center gap-1 bg-white p-1.5 rounded-full border border-gray-200 shadow-xs overflow-x-auto w-full lg:w-auto no-scrollbar shrink-0">
                 <FilterTab value="all" label="كل الوقت" currentFilter={timeFilter} onFilterChange={setTimeFilter} />
                 <FilterTab value="1m" label="آخر شهر" currentFilter={timeFilter} onFilterChange={setTimeFilter} />
@@ -128,7 +139,6 @@ export default function Supporters() {
                 <FilterTab value="6m" label="6 أشهر" currentFilter={timeFilter} onFilterChange={setTimeFilter} />
                 <FilterTab value="1y" label="آخر سنة" currentFilter={timeFilter} onFilterChange={setTimeFilter} />
               </div>
-              
             </div>
 
             <div className="relative w-full">

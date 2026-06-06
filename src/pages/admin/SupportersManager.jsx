@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from '../../components/layout/Sidebar';
-import ConfirmModal from '../../components/ui/ConfirmModal'; // 🌟 استيراد نافذة التأكيد
+import ConfirmModal from '../../components/ui/ConfirmModal';
 import { 
   fetchAllProviders, 
   createProvider, 
@@ -8,18 +8,14 @@ import {
   fetchCategories,
   createCategory
 } from '../../services/api';
+import { useToast } from '../../hooks/useToast';
 
 export default function SupportersManager() {
   const [categories, setCategories] = useState([]);
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
-  const showNotification = (message, type = 'success') => {
-    setToast({ show: true, message, type });
-    setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 4000);
-  };
+  const { toast, showNotification } = useToast();
 
   // 🌟 حالة نافذة التأكيد المخصصة
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null, name: '' });
@@ -115,9 +111,15 @@ export default function SupportersManager() {
 
   const groupedData = categories.map(cat => ({
     ...cat,
-    linkedProviders: providers.filter(p => p.category === cat.id)
+    linkedProviders: providers.filter(
+      (provider) => provider.category?.id === cat.id || provider.category === cat.id
+    ),
   }));
-  const unassignedProviders = providers.filter(p => !p.category);
+  const unassignedProviders = providers.filter((provider) => {
+    const categoryId = provider.category?.id ?? provider.category;
+    if (categoryId == null || categoryId === '') return true;
+    return !categories.some((cat) => cat.id === categoryId);
+  });
 
   return (
     <div className="flex bg-gray-50 min-h-[calc(100vh-68px)] relative" dir="rtl">

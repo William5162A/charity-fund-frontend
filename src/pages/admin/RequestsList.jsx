@@ -10,8 +10,8 @@ export default function RequestsList() {
   const navigate = useNavigate();
   
   const { user } = useAuth();
-  // 🌟 تحديث التوجيه الديناميكي ليطابق المسارات الجديدة تماماً
-  const basePath = user?.role === ROLES.ADMIN ? '/admin' : '/processor';
+  const isAdmin = user?.role === ROLES.ADMIN; // 🌟 تحديد الصلاحية بوضوح
+  const basePath = isAdmin ? '/admin' : '/processor';
 
   const [searchTerm, setSearchTerm] = useState('');
   const [dataState, setDataState] = useState({ items: [], loading: true, error: null });
@@ -20,12 +20,10 @@ export default function RequestsList() {
   const isCompletedPage = location.pathname.includes('completed');
   const pageTitle = isCompletedPage ? 'الطلبات المنجزة' : 'الطلبات الواردة الجديدة';
 
-  const [prevPath, setPrevPath] = useState(location.pathname);
-  if (location.pathname !== prevPath) {
-    setPrevPath(location.pathname);
+  useEffect(() => {
     setActiveSort({ column: null, value: 'default' });
     setSearchTerm('');
-  }
+  }, [location.pathname]);
 
   const STATUS_MAP = {
     'pending': 'قيد الدراسة',
@@ -41,7 +39,7 @@ export default function RequestsList() {
       setDataState(prev => ({ ...prev, loading: true, error: null }));
 
       try {
-        const rawData = await fetchAidRequests();
+        const rawData = await fetchAidRequests(abortController.signal);
         
         if (abortController.signal.aborted) return;
 
@@ -51,7 +49,7 @@ export default function RequestsList() {
 
         setDataState({ items: statusFiltered, loading: false, error: null });
       } catch (err) {
-        if (abortController.signal.aborted) return;
+        if (abortController.signal.aborted || err.name === 'CanceledError') return;
         setDataState({ items: [], loading: false, error: err.message });
       }
     };
@@ -163,7 +161,8 @@ export default function RequestsList() {
       <Sidebar />
       <div className="flex-1 p-6 lg:p-10 w-full overflow-hidden">
         
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-center mb-8">
+        {/* 🌟 إعادة هيكلة الترويسة لتصبح مرنة (Flexbox) ودعم زر الإضافة */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8">
           <h2 className="text-3xl font-bold text-gray-800 font-serif flex items-center gap-3">
             {pageTitle}
             <span className="bg-blue-100 text-blue-800 text-xl px-4 py-1 rounded-full shadow-inner font-black border-2 border-blue-200">
@@ -171,13 +170,21 @@ export default function RequestsList() {
             </span>
           </h2>
           
-          <div className="lg:justify-self-end w-full lg:w-80">
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
+            {isAdmin && !isCompletedPage && (
+              <button 
+                onClick={() => navigate('/admin/create-request')} 
+                className="w-full sm:w-auto bg-purple-700 hover:bg-purple-800 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-sm cursor-pointer hover:-translate-y-0.5 whitespace-nowrap"
+              >
+                + إضافة طلب جديد
+              </button>
+            )}
             <input 
               type="text" 
               placeholder="ابحث برقم الطلب أو اسم المريض..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full border border-gray-200 p-2.5 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+              className="w-full sm:w-80 border border-gray-200 p-2.5 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-all"
             />
           </div>
         </div>

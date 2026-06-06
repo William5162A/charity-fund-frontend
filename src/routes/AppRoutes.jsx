@@ -13,6 +13,7 @@ import UsersManager from '../pages/admin/UsersManager';
 import Reports from '../pages/admin/Reports';
 import Supporters from '../pages/admin/Supporters';
 import SupportersManager from '../pages/admin/SupportersManager';
+import PatientDetails from '../pages/admin/PatientDetails';
 
 // تجميع الصفحات المشتركة
 const ManagementRoutes = () => (
@@ -33,28 +34,40 @@ export default function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Login />} />
-      
+
       {/* مسار الطبيب */}
       <Route path="/doctor/*" element={
         <ProtectedRoute allowedRoles={[ROLES.DOCTOR]}>
           <DoctorForm />
         </ProtectedRoute>
       } />
-      
+
       {/* 🌟 المسار الجديد للجنة الإدارية */}
       <Route path="/processor/*" element={
         <ProtectedRoute allowedRoles={[ROLES.PROCESSOR]}>
           <ManagementRoutes />
         </ProtectedRoute>
       } />
-      
+
+      <Route path="/admin/create-request" element={
+        <ProtectedRoute allowedRoles={[ROLES.ADMIN]}>
+          <DoctorForm />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/admin/patients/:id" element={
+        <ProtectedRoute allowedRoles={[ROLES.ADMIN]}>
+          <PatientDetails />
+        </ProtectedRoute>
+      } />
+
       {/* 🌟 المسار الجديد للمدير العام */}
       <Route path="/admin/*" element={
         <ProtectedRoute allowedRoles={[ROLES.ADMIN]}>
           <ManagementRoutes />
         </ProtectedRoute>
       } />
-      
+
       {/* أي مسار غير معروف يوجه لصفحة الدخول */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

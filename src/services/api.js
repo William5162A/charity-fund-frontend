@@ -1,7 +1,15 @@
 import axios from 'axios';
 
 // الرابط الأساسي للباك إند
-const BASE_URL = 'http://127.0.0.1:8000/api/';
+const BASE_URL = 'http://127.0.0.1:8080/api/';
+
+const asArray = (data) => {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.results)) return data.results;
+  return [];
+};
+
+const buildRequestConfig = (signal) => (signal ? { signal } : undefined);
 
 // إنشاء نسخة مخصصة من Axios
 const api = axios.create({
@@ -23,7 +31,7 @@ api.interceptors.request.use(
 );
 
 api.interceptors.response.use(
-  (response) => response, 
+  (response) => response,
   async (error) => {
     const originalRequest = error.config;
 
@@ -32,27 +40,28 @@ api.interceptors.response.use(
 
       try {
         const refreshToken = localStorage.getItem('refresh_token');
-        
+
         if (!refreshToken) {
           throw new Error('لا يوجد مفتاح تجديد');
         }
 
         const res = await axios.post(`${BASE_URL}token/refresh/`, { refresh: refreshToken });
-        
+
         localStorage.setItem('access_token', res.data.access);
-        
+
         originalRequest.headers.Authorization = `Bearer ${res.data.access}`;
         return api(originalRequest);
-
       } catch (refreshError) {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('userRole');
-        window.location.href = '/login'; 
+        localStorage.removeItem('userName');
+        localStorage.removeItem('userId');
+        window.location.href = '/';
         return Promise.reject(refreshError);
       }
     }
-    
+
     return Promise.reject(error);
   }
 );
@@ -71,18 +80,28 @@ export const loginUser = async (email, password) => {
 };
 
 
-export const fetchAidRequests = async () => {
+export const fetchAidRequests = async (signal) => {
   try {
-    const response = await api.get('aid-requests/requests/');
-    return response.data.results || [];
+    const response = await api.get('aid-requests/requests/', buildRequestConfig(signal));
+    return asArray(response.data);
   } catch (error) {
+    if (error.name === 'CanceledError' || signal?.aborted) {
+      throw error;
+    }
     throw new Error(error.response?.data?.detail || 'فشل جلب بيانات الطلبات من الخادم');
   }
 };
 
-export const fetchAidRequestDetails = async (id) => {
-  const response = await api.get(`aid-requests/requests/${id}/`);
-  return response.data;
+export const fetchAidRequestDetails = async (id, signal) => {
+  try {
+    const response = await api.get(`aid-requests/requests/${id}/`, buildRequestConfig(signal));
+    return response.data;
+  } catch (error) {
+    if (error.name === 'CanceledError' || signal?.aborted) {
+      throw error;
+    }
+    throw error;
+  }
 };
 
 export const updateRequestStatus = async (id, status) => {
@@ -90,19 +109,33 @@ export const updateRequestStatus = async (id, status) => {
   return response.data;
 };
 
-export const fetchPatientDetails = async (patientId) => {
-  const response = await api.get(`patients/${patientId}/`);
-  return response.data;
+export const fetchPatientDetails = async (patientId, signal) => {
+  try {
+    const response = await api.get(`patients/${patientId}/`, buildRequestConfig(signal));
+    return response.data;
+  } catch (error) {
+    if (error.name === 'CanceledError' || signal?.aborted) {
+      throw error;
+    }
+    throw error;
+  }
 };
 
-export const fetchPatientFamily = async (patientId) => {
-  const response = await api.get(`patients/${patientId}/family/`);
-  return response.data;
+export const fetchPatientFamily = async (patientId, signal) => {
+  try {
+    const response = await api.get(`patients/${patientId}/family/`, buildRequestConfig(signal));
+    return asArray(response.data);
+  } catch (error) {
+    if (error.name === 'CanceledError' || signal?.aborted) {
+      throw error;
+    }
+    throw error;
+  }
 };
 
-export const fetchAllProviders = async () => {
-  const response = await api.get('aid-providers/providers/');
-  return response.data.results || response.data; 
+export const fetchAllProviders = async (signal) => {
+  const response = await api.get('aid-providers/providers/', buildRequestConfig(signal));
+  return asArray(response.data);
 };
 
 export const assignProviderToRequest = async (requestId, providerData) => {
@@ -110,11 +143,14 @@ export const assignProviderToRequest = async (requestId, providerData) => {
   return response.data;
 };
 
-export const fetchUsers = async () => {
+export const fetchUsers = async (signal) => {
   try {
-    const response = await api.get('users/');
-    return response.data.results || response.data;
+    const response = await api.get('users/', buildRequestConfig(signal));
+    return asArray(response.data);
   } catch (error) {
+    if (error.name === 'CanceledError' || signal?.aborted) {
+      throw error;
+    }
     throw new Error(error.response?.data?.detail || 'فشل جلب قائمة المستخدمين');
   }
 };
@@ -155,45 +191,38 @@ export const deleteUserApi = async (id) => {
 // 🌟 دوال واجهة الطبيب الجديدة (EMR System)
 // ==========================================
 
-// استبدل الدالة القديمة بهذه:
 export const searchPatients = async (query, signal) => {
   try {
-    // نعتمد على معيار Django القياسي ?search= للبحث في الحروف أو الأرقام
-    const response = await api.get(`patients/?search=${query}`, { signal });
-    return response.data.results || response.data;
+    const response = await api.get(`patients/?search=${query}`, buildRequestConfig(signal));
+    return asArray(response.data);
   } catch (error) {
-    if (error.name === 'CanceledError') return []; // تجاهل الخطأ إذا تم إلغاء الطلب عمداً
+    if (error.name === 'CanceledError' || signal?.aborted) return [];
     throw new Error('فشل البحث في قاعدة بيانات المرضى.');
   }
 };
 
-// 2. جلب تاريخ طلبات مريض محدد (للإحصائيات)
-// 2. جلب تاريخ طلبات مريض محدد (مع درع فلترة صارم)
 export const fetchRequestsByPatientId = async (patientId) => {
   try {
     const response = await api.get(`aid-requests/requests/?patient=${patientId}`);
-    const results = response.data.results || response.data;
-    
-    // 🌟 الدرع المعماري: فلترة النتائج إجبارياً في الفرونت إند لأن الباك إند يرسل كل شيء
-    const strictResults = results.filter(req => 
-      // نتحقق مما إذا كان الباك إند يرسل المريض كرقم (ID) أو ككائن (Object)
+    const results = asArray(response.data);
+
+    const strictResults = results.filter(req =>
       req.patient === patientId || req.patient?.id === patientId
     );
-    
+
     return strictResults;
   } catch (error) {
     console.error('فشل جلب تاريخ المريض:', error);
-    return []; // نعيد مصفوفة فارغة كي لا يتعطل النظام
+    return [];
   }
 };
 
 export const createPatient = async (patientData) => {
   try {
     const response = await api.post('patients/', patientData);
-    return response.data; 
+    return response.data;
   } catch (error) {
     const errData = error.response?.data;
-    // التقاط خطأ التكرار (Unique Constraint) بشكل دقيق
     if (errData?.national_number) {
       throw new Error('الرقم الوطني موجود مسبقاً في النظام. يرجى البحث عن المريض بدلاً من إضافته.');
     }
@@ -227,10 +256,9 @@ export const deleteProvider = async (id) => {
   return response.data;
 };
 
-// --- دوال إدارة تصنيفات الجهات الداعمة (Categories) ---
 export const fetchCategories = async (signal) => {
-  const response = await api.get('aid-providers/categories/', { signal });
-  return response.data.results || response.data;
+  const response = await api.get('aid-providers/categories/', buildRequestConfig(signal));
+  return asArray(response.data);
 };
 
 export const createCategory = async (categoryData) => {
@@ -238,9 +266,39 @@ export const createCategory = async (categoryData) => {
   return response.data;
 };
 
-// حذف مساهمة مالية (جهة داعمة) من طلب طبي
 export const removeProviderFromRequest = async (contributionId) => {
   const response = await api.delete(`aid-requests/providers/${contributionId}/`);
+  return response.data;
+};
+
+export const updateAidRequest = async (id, payload) => {
+  const response = await api.patch(`aid-requests/requests/${id}/`, payload);
+  return response.data;
+};
+
+export const updatePatientDetails = async (id, patientData) => {
+  const response = await api.patch(`patients/${id}/`, patientData);
+  return response.data;
+};
+
+export const addPatientFamilyMember = async (patientId, memberData) => {
+  const payload = { ...memberData, patient: patientId };
+  const response = await api.post('patient-family/', payload);
+  return response.data;
+};
+
+export const updatePatientFamilyMember = async (memberId, memberData) => {
+  const response = await api.patch(`patient-family/${memberId}/`, memberData);
+  return response.data;
+};
+
+export const deletePatientFamilyMember = async (memberId) => {
+  const response = await api.delete(`patient-family/${memberId}/`);
+  return response.data;
+};
+
+export const deleteSystemUser = async (userId) => {
+  const response = await api.delete(`users/${userId}/`);
   return response.data;
 };
 

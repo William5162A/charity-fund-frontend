@@ -5,17 +5,13 @@ import {
   createPatient, 
   createFamilyMember, 
   createAidRequest,
-  searchPatients, // الدالة المحدثة
+  searchPatients,
   fetchRequestsByPatientId
 } from '../../services/api';
+import { useToast } from '../../hooks/useToast';
 
 export default function DoctorForm() {
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
-  
-  const showNotification = (message, type = 'success') => {
-    setToast({ show: true, message, type });
-    setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 5000); 
-  };
+  const { toast, showNotification } = useToast(5000);
 
   // 🌟 إدارة حالة الواجهة الجديدة
   const [wizardStep, setWizardStep] = useState('search'); // 'search' | 'new_patient' | 'selected_patient'

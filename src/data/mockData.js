@@ -90,23 +90,3 @@ export const getSupportersData = () => {
 export const saveSupportersData = (data) => {
   localStorage.setItem('supportersData', JSON.stringify(data));
 };
-
-// ==========================================
-// 4. 🌟 دوال الصندوق العام المتراكم (General Fund)
-// ==========================================
-
-export const getGeneralFundBalance = () => {
-  const balance = localStorage.getItem('general_fund_balance');
-  return balance ? Number(balance) : 0;
-};
-
-/**
- * تحديث رصيد الصندوق
- * @param {number} amount - المبلغ المراد إضافته (أو طرحه إذا كان سالباً)
- */
-export const updateGeneralFundBalance = (amount) => {
-  const currentBalance = getGeneralFundBalance();
-  const newBalance = currentBalance + Number(amount);
-  localStorage.setItem('general_fund_balance', newBalance.toString());
-  return newBalance;
-};

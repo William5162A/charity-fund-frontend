@@ -1,41 +1,50 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from '../../components/layout/Sidebar';
-import { fetchUsers, createUser, updateUser, deleteUserApi } from '../../services/api';
+import { fetchUsers, createUser, updateUser, deleteSystemUser } from '../../services/api';
 import { formatDate } from '../../utils/formatters';
-import { ROLES } from '../../context/AuthContext'; // 🌟 استيراد القاموس المركزي لضمان التطابق
+import { useAuth, ROLES } from '../../context/AuthContext';
+import { useToast } from '../../hooks/useToast';
 
 export default function UsersManager() {
+  const { user: currentUser } = useAuth();
+
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // 🌟 القيمة الافتراضية أصبحت للجنة الإدارية باستخدام القاموس الموحد
   const [formData, setFormData] = useState({ id: null, full_name: '', email: '', password: '', role: ROLES.PROCESSOR });
   const [isEditing, setIsEditing] = useState(false);
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
-  
+  const { toast, showNotification } = useToast(3000);
+
   const [deleteModal, setDeleteModal] = useState({ show: false, userId: null, userName: '', userRole: '' });
 
-  const showNotification = (message, type = 'success') => {
-    setToast({ show: true, message, type });
-    setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
-  };
-
-  const loadUsers = async () => {
+  const loadUsers = async (signal) => {
     setLoading(true);
+
     try {
-      const data = await fetchUsers();
+      const data = await fetchUsers(signal);
+
+      if (signal?.aborted) return;
+
       setUsers(data);
       setError(null);
     } catch (err) {
+      if (signal?.aborted || err.name === 'CanceledError') return;
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadUsers();
+    const abortController = new AbortController();
+    loadUsers(abortController.signal);
+
+    return () => {
+      abortController.abort();
+    };
   }, []);
 
   const handleInputChange = (e) => {
@@ -44,12 +53,12 @@ export default function UsersManager() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     try {
       const payload = {
         email: formData.email.trim(),
         full_name: formData.full_name.trim(),
-        role: formData.role
+        role: formData.role,
       };
 
       if (formData.password) {
@@ -67,7 +76,7 @@ export default function UsersManager() {
         await createUser(payload);
         showNotification('تم إضافة المستخدم الجديد بنجاح!');
       }
-      
+
       await loadUsers();
       resetForm();
     } catch (err) {
@@ -76,27 +85,25 @@ export default function UsersManager() {
   };
 
   const editUser = (user) => {
-    // 🌟 حماية مدير النظام باستخدام المرجع المركزي
-    if (user.role === ROLES.ADMIN) {
-      showNotification('لا يمكن تعديل بيانات مدير النظام من هذه الشاشة!', 'error');
+    if (user.id === currentUser?.id) {
+      showNotification('لا يمكنك تعديل حسابك الشخصي النشط من هنا!', 'error');
       return;
     }
-    
-    setFormData({ 
-      id: user.id, 
-      full_name: user.full_name, 
-      email: user.email, 
-      password: '', 
-      role: user.role 
+
+    setFormData({
+      id: user.id,
+      full_name: user.full_name,
+      email: user.email,
+      password: '',
+      role: user.role,
     });
     setIsEditing(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const deleteUser = (id, role, name) => {
-    // 🌟 حماية مدير النظام من الحذف
-    if (role === ROLES.ADMIN) {
-      showNotification('لا يمكن حذف حساب مدير النظام!', 'error');
+    if (id === currentUser?.id) {
+      showNotification('عملية مرفوضة: لا يمكنك حذف حسابك الشخصي النشط!', 'error');
       return;
     }
     setDeleteModal({ show: true, userId: id, userName: name, userRole: role });
@@ -104,10 +111,10 @@ export default function UsersManager() {
 
   const confirmDelete = async () => {
     try {
-      await deleteUserApi(deleteModal.userId);
+      await deleteSystemUser(deleteModal.userId);
+      setUsers(prevUsers => prevUsers.filter(u => u.id !== deleteModal.userId));
       showNotification(`تم حذف حساب "${deleteModal.userName}" بنجاح!`);
       closeDeleteModal();
-      loadUsers();
     } catch (err) {
       showNotification(err.message, 'error');
       closeDeleteModal();
@@ -123,9 +130,8 @@ export default function UsersManager() {
     setIsEditing(false);
   };
 
-  // 🌟 تحديث المسميات لتطابق البنية الجديدة
   const getRoleName = (role) => {
-    switch(role) {
+    switch (role) {
       case ROLES.ADMIN: return 'مدير النظام';
       case ROLES.PROCESSOR: return 'لجنة إدارية';
       case ROLES.DOCTOR: return 'طبيب معالج';
@@ -157,13 +163,13 @@ export default function UsersManager() {
                 أنت على وشك حذف حساب <span className="font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded">{deleteModal.userName}</span> ({getRoleName(deleteModal.userRole)}) نهائياً من الخادم.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <button 
+                <button
                   onClick={confirmDelete}
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-red-200 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   ❌ نعم، احذفه الآن
                 </button>
-                <button 
+                <button
                   onClick={closeDeleteModal}
                   className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl transition-colors cursor-pointer"
                 >
@@ -182,17 +188,17 @@ export default function UsersManager() {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-          
+
           <div className="xl:col-span-1">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 sticky top-10">
               <h3 className="text-lg font-bold text-blue-800 mb-6 border-b pb-2">
                 {isEditing ? '✏️ تعديل بيانات المستخدم' : '➕ إضافة مستخدم جديد'}
               </h3>
-              
+
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">الاسم الكامل (full_name)</label>
-                  <input required type="text" name="full_name" value={formData.full_name} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none" placeholder="مثال: د. أحمد" />
+                  <input required type="text" name="full_name" value={formData.full_name} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none" placeholder="مثال: د. فادي" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">البريد الإلكتروني (email)</label>
@@ -200,29 +206,29 @@ export default function UsersManager() {
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">
-                    كلمة المرور 
+                    كلمة المرور
                     {isEditing && <span className="text-xs text-orange-500 mr-2">(اتركها فارغة إذا لم ترد تغييرها)</span>}
                   </label>
-                  <input 
-                    type="text" 
-                    name="password" 
-                    value={formData.password} 
-                    onChange={handleInputChange} 
-                    className="w-full border border-gray-300 p-2.5 rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none" 
-                    dir="ltr" 
-                    placeholder="******" 
+                  <input
+                    type="password"
+                    name="password"
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    className="w-full border border-gray-300 p-2.5 rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none"
+                    dir="ltr"
+                    placeholder="******"
+                    autoComplete={isEditing ? 'new-password' : 'new-password'}
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">الصلاحية (role)</label>
                   <select required name="role" value={formData.role} onChange={handleInputChange} className="w-full border border-gray-300 p-2.5 rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none font-bold">
-                    {/* 🌟 استخدام القاموس هنا لضمان الإرسال الدقيق للباك إند */}
                     <option value={ROLES.ADMIN}>مدير نظام (Admin)</option>
                     <option value={ROLES.PROCESSOR}>لجنة إدارية (Processor)</option>
                     <option value={ROLES.DOCTOR}>طبيب (Doctor)</option>
                   </select>
                 </div>
-                
+
                 <div className="pt-4 flex gap-2">
                   <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl shadow-md transition-colors cursor-pointer">
                     {isEditing ? 'حفظ التعديلات' : 'إنشاء الحساب'}
@@ -242,7 +248,7 @@ export default function UsersManager() {
               <div className="bg-gray-50 p-5 border-b border-gray-100 flex justify-between items-center">
                 <h3 className="font-bold text-gray-800 text-lg">الحسابات المسجلة في الخادم ({users.length})</h3>
               </div>
-              
+
               {loading ? (
                 <div className="p-16 flex flex-col items-center justify-center">
                   <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
@@ -262,42 +268,47 @@ export default function UsersManager() {
                       </tr>
                     </thead>
                     <tbody>
-                      {users.map(user => (
-                        <tr key={user.id} className="border-b border-gray-50 hover:bg-blue-50/50 transition-colors">
-                          <td className="p-4 font-bold text-gray-800">{user.full_name}</td>
-                          <td className="p-4 text-gray-600 font-mono" dir="ltr">{user.email}</td>
-                          <td className="p-4">
-                            {/* 🌟 التلوين الذكي بناءً على المرجع المركزي */}
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap border ${
-                              user.role === ROLES.ADMIN ? 'bg-purple-100 text-purple-700 border-purple-200' :
-                              user.role === ROLES.PROCESSOR ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200'
-                            }`}>
-                              {getRoleName(user.role)}
-                            </span>
-                          </td>
-                          <td className="p-4 text-center text-gray-500 text-xs font-bold whitespace-nowrap">
-                            {user.created_at ? formatDate(user.created_at) : 'غير متوفر'}
-                          </td>
-                          <td className="p-4 text-center">
-                            <div className="flex justify-center gap-2">
-                              <button 
-                                onClick={() => editUser(user)}
-                                disabled={user.role === ROLES.ADMIN}
-                                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${user.role === ROLES.ADMIN ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 cursor-pointer'}`}
-                              >
-                                ✏️ تعديل
-                              </button>
-                              <button 
-                                onClick={() => deleteUser(user.id, user.role, user.full_name)}
-                                disabled={user.role === ROLES.ADMIN}
-                                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${user.role === ROLES.ADMIN ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white border border-red-200 text-red-600 hover:bg-red-50 cursor-pointer'}`}
-                              >
-                                🗑️ حذف
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                      {users.map(user => {
+                        const isSelf = user.id === currentUser?.id;
+                        return (
+                          <tr key={user.id} className="border-b border-gray-50 hover:bg-blue-50/50 transition-colors">
+                            <td className="p-4 font-bold text-gray-800">
+                              {user.full_name}
+                              {isSelf && <span className="mr-2 text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">أنت</span>}
+                            </td>
+                            <td className="p-4 text-gray-600 font-mono" dir="ltr">{user.email}</td>
+                            <td className="p-4">
+                              <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap border ${
+                                user.role === ROLES.ADMIN ? 'bg-purple-100 text-purple-700 border-purple-200' :
+                                user.role === ROLES.PROCESSOR ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                              }`}>
+                                {getRoleName(user.role)}
+                              </span>
+                            </td>
+                            <td className="p-4 text-center text-gray-500 text-xs font-bold whitespace-nowrap">
+                              {user.created_at ? formatDate(user.created_at) : 'غير متوفر'}
+                            </td>
+                            <td className="p-4 text-center">
+                              <div className="flex justify-center gap-2">
+                                <button
+                                  onClick={() => editUser(user)}
+                                  disabled={isSelf}
+                                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${isSelf ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 cursor-pointer'}`}
+                                >
+                                  ✏️ تعديل
+                                </button>
+                                <button
+                                  onClick={() => deleteUser(user.id, user.role, user.full_name)}
+                                  disabled={isSelf}
+                                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${isSelf ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white border border-red-200 text-red-600 hover:bg-red-50 cursor-pointer'}`}
+                                >
+                                  🗑️ حذف
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

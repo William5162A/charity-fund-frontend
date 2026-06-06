@@ -19,11 +19,12 @@ export default function Dashboard() {
     
     const loadDashboardData = async () => {
       try {
-        const data = await fetchAidRequests();
+        const data = await fetchAidRequests(abortController.signal);
         if (!abortController.signal.aborted) {
           setDataState({ items: data, loading: false, error: null });
         }
       } catch (err) {
+        if (abortController.signal.aborted || err.name === 'CanceledError') return;
         if (!abortController.signal.aborted) {
           setDataState({ items: [], loading: false, error: err.message });
         }
@@ -38,7 +39,7 @@ export default function Dashboard() {
 
   // إحصائيات الطلبات
   const stats = useMemo(() => {
-    return {
+    return { 
       total: requests.length,
       completed: requests.filter(req => req.request_status === 'completed').length,
       pending: requests.filter(req => ['pending', 'processing'].includes(req.request_status)).length,
@@ -178,7 +179,7 @@ export default function Dashboard() {
                         <p className={`font-black ${financialStats.surplus > 0 ? 'text-cyan-900' : 'text-amber-900'}`}>
                           {financialStats.surplus > 0 ? 'الفائض النقدي' : 'فجوة التمويل'}
                         </p>
-                        <p className="text-xs font-bold opacity-60">تحديث لحظي من الباك إند</p>
+                        {/* <p className="text-xs font-bold opacity-60">تحديث لحظي من الباك إند</p> */}
                       </div>
                     </div>
                     <p className={`text-2xl font-black ${financialStats.surplus > 0 ? 'text-cyan-700' : 'text-amber-700'}`}>

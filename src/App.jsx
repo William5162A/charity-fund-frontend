@@ -6,7 +6,7 @@ import AppRoutes from './routes/AppRoutes';
 export default function App() {
   return (
     <BrowserRouter>
-      <div dir="rtl" className="min-h-screen bg-gray-50 font-sans text-gray-900">
+      <div dir="rtl" className="app-shell font-sans">
         <GlobalHeader />
         <main>
           <AppRoutes />
