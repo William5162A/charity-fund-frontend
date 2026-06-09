@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // الرابط الأساسي للباك إند
-const BASE_URL = 'http://127.0.0.1:8080/api/';
+const BASE_URL = 'http://127.0.0.1:8000/api/';
 
 const asArray = (data) => {
   if (Array.isArray(data)) return data;
@@ -9,7 +9,12 @@ const asArray = (data) => {
   return [];
 };
 
-const buildRequestConfig = (signal) => (signal ? { signal } : undefined);
+const buildRequestConfig = (signal, params) => {
+  const config = {};
+  if (signal) config.signal = signal;
+  if (params) config.params = params;
+  return Object.keys(config).length ? config : undefined;
+};
 
 // إنشاء نسخة مخصصة من Axios
 const api = axios.create({
@@ -80,9 +85,9 @@ export const loginUser = async (email, password) => {
 };
 
 
-export const fetchAidRequests = async (signal) => {
+export const fetchAidRequests = async (signal, params = {}) => {
   try {
-    const response = await api.get('aid-requests/requests/', buildRequestConfig(signal));
+    const response = await api.get('aid-requests/requests/', buildRequestConfig(signal, params));
     return asArray(response.data);
   } catch (error) {
     if (error.name === 'CanceledError' || signal?.aborted) {
@@ -121,9 +126,9 @@ export const fetchPatientDetails = async (patientId, signal) => {
   }
 };
 
-export const fetchPatientFamily = async (patientId, signal) => {
+export const fetchPatientFamily = async (patientId, signal, params = {}) => {
   try {
-    const response = await api.get(`patients/${patientId}/family/`, buildRequestConfig(signal));
+    const response = await api.get(`patients/${patientId}/family/`, buildRequestConfig(signal, params));
     return asArray(response.data);
   } catch (error) {
     if (error.name === 'CanceledError' || signal?.aborted) {
@@ -133,8 +138,8 @@ export const fetchPatientFamily = async (patientId, signal) => {
   }
 };
 
-export const fetchAllProviders = async (signal) => {
-  const response = await api.get('aid-providers/providers/', buildRequestConfig(signal));
+export const fetchAllProviders = async (signal, params = {}) => {
+  const response = await api.get('aid-providers/providers/', buildRequestConfig(signal, params));
   return asArray(response.data);
 };
 
@@ -143,9 +148,9 @@ export const assignProviderToRequest = async (requestId, providerData) => {
   return response.data;
 };
 
-export const fetchUsers = async (signal) => {
+export const fetchUsers = async (signal, params = {}) => {
   try {
-    const response = await api.get('users/', buildRequestConfig(signal));
+    const response = await api.get('users/', buildRequestConfig(signal, params));
     return asArray(response.data);
   } catch (error) {
     if (error.name === 'CanceledError' || signal?.aborted) {
@@ -191,9 +196,9 @@ export const deleteUserApi = async (id) => {
 // 🌟 دوال واجهة الطبيب الجديدة (EMR System)
 // ==========================================
 
-export const searchPatients = async (query, signal) => {
+export const searchPatients = async (query, signal, params = {}) => {
   try {
-    const response = await api.get(`patients/?search=${query}`, buildRequestConfig(signal));
+    const response = await api.get('patients/', buildRequestConfig(signal, { search: query, ...params }));
     return asArray(response.data);
   } catch (error) {
     if (error.name === 'CanceledError' || signal?.aborted) return [];
@@ -256,8 +261,8 @@ export const deleteProvider = async (id) => {
   return response.data;
 };
 
-export const fetchCategories = async (signal) => {
-  const response = await api.get('aid-providers/categories/', buildRequestConfig(signal));
+export const fetchCategories = async (signal, params = {}) => {
+  const response = await api.get('aid-providers/categories/', buildRequestConfig(signal, params));
   return asArray(response.data);
 };
 
@@ -282,18 +287,17 @@ export const updatePatientDetails = async (id, patientData) => {
 };
 
 export const addPatientFamilyMember = async (patientId, memberData) => {
-  const payload = { ...memberData, patient: patientId };
-  const response = await api.post('patient-family/', payload);
+  const response = await api.post(`patients/${patientId}/family/`, memberData);
   return response.data;
 };
 
 export const updatePatientFamilyMember = async (memberId, memberData) => {
-  const response = await api.patch(`patient-family/${memberId}/`, memberData);
+  const response = await api.patch(`patients/family/${memberId}/`, memberData);
   return response.data;
 };
 
 export const deletePatientFamilyMember = async (memberId) => {
-  const response = await api.delete(`patient-family/${memberId}/`);
+  const response = await api.delete(`patients/family/${memberId}/`);
   return response.data;
 };
 

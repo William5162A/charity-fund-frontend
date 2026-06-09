@@ -163,15 +163,20 @@ export default function DoctorForm() {
         targetPatientId = createdPatient.id;
 
         if (familyMembers.length > 0) {
-          const familyPromises = familyMembers.map(member => {
-            return createFamilyMember(targetPatientId, {
-              full_name: member.full_name,
-              gender: member.gender === 'ذكر' ? 'male' : 'female',
-              relation: member.relation,
-              birth_date: new Date(new Date().setFullYear(new Date().getFullYear() - Number(member.age))).toISOString().split('T')[0]
+          if (!targetPatientId) {
+            showNotification('تعذر الحصول على معرف المريض لربط أفراد العائلة.', 'error');
+          } else {
+            const familyPromises = familyMembers.map(member => {
+              return createFamilyMember(targetPatientId, {
+                full_name: member.full_name,
+                gender: member.gender === 'ذكر' ? 'male' : 'female',
+                relation: member.relation,
+                patient: targetPatientId,
+                birth_date: new Date(new Date().setFullYear(new Date().getFullYear() - Number(member.age))).toISOString().split('T')[0]
+              });
             });
-          });
-          await Promise.all(familyPromises);
+            await Promise.all(familyPromises);
+          }
         }
       }
 

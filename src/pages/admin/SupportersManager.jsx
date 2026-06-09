@@ -20,13 +20,14 @@ export default function SupportersManager() {
   // 🌟 حالة نافذة التأكيد المخصصة
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null, name: '' });
   const [isDeleting, setIsDeleting] = useState(false);
+  const [providerSearch, setProviderSearch] = useState('');
 
-  const loadData = async (signal = null) => {
+  const loadData = async (signal = null, params = {}) => {
     setLoading(true);
     try {
       const [catsData, provsData] = await Promise.all([
         fetchCategories(signal),
-        fetchAllProviders(signal)
+        fetchAllProviders(signal, params)
       ]);
       if (signal?.aborted) return;
       setCategories(catsData);
@@ -42,9 +43,11 @@ export default function SupportersManager() {
 
   useEffect(() => {
     const abortController = new AbortController();
-    loadData(abortController.signal);
+    const params = {};
+    if (providerSearch.trim()) params.search = providerSearch.trim();
+    loadData(abortController.signal, params);
     return () => abortController.abort();
-  }, []);
+  }, [providerSearch]);
 
   const [newCategoryName, setNewCategoryName] = useState('');
   const [isSubmittingCat, setIsSubmittingCat] = useState(false);
@@ -142,9 +145,18 @@ export default function SupportersManager() {
       )}
 
       <div className="flex-1 p-4 lg:p-10 w-full overflow-y-auto">
-        <div className="mb-8 border-b border-gray-200 pb-4">
-          <h2 className="text-3xl font-bold text-purple-800">الهيكلية التنظيمية للشركاء</h2>
-          <p className="text-gray-500 mt-2 font-bold">إدارة تصنيفات الجهات الداعمة وربط الفروع والمؤسسات بها.</p>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b border-gray-200 pb-4 gap-4">
+          <div>
+            <h2 className="text-3xl font-bold text-purple-800">الهيكلية التنظيمية للشركاء</h2>
+            <p className="text-gray-500 mt-2 font-bold">إدارة تصنيفات الجهات الداعمة وربط الفروع والمؤسسات بها.</p>
+          </div>
+          <input
+            type="text"
+            placeholder="ابحث عن جهة داعمة..."
+            value={providerSearch}
+            onChange={(e) => setProviderSearch(e.target.value)}
+            className="w-full md:w-64 border border-gray-200 p-2.5 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none shadow-sm"
+          />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">

@@ -16,6 +16,7 @@ export default function RequestsList() {
   const [searchTerm, setSearchTerm] = useState('');
   const [dataState, setDataState] = useState({ items: [], loading: true, error: null });
   const [activeSort, setActiveSort] = useState({ column: null, value: 'default' });
+  const [statusFilter, setStatusFilter] = useState('');
 
   const isCompletedPage = location.pathname.includes('completed');
   const pageTitle = isCompletedPage ? 'الطلبات المنجزة' : 'الطلبات الواردة الجديدة';
@@ -23,6 +24,7 @@ export default function RequestsList() {
   useEffect(() => {
     setActiveSort({ column: null, value: 'default' });
     setSearchTerm('');
+    setStatusFilter('');
   }, [location.pathname]);
 
   const STATUS_MAP = {
@@ -39,13 +41,18 @@ export default function RequestsList() {
       setDataState(prev => ({ ...prev, loading: true, error: null }));
 
       try {
-        const rawData = await fetchAidRequests(abortController.signal);
+        const params = {};
+        if (statusFilter) params.request_status = statusFilter;
+
+        const rawData = await fetchAidRequests(abortController.signal, params);
         
         if (abortController.signal.aborted) return;
 
-        const statusFiltered = rawData.filter(req => 
-          isCompletedPage ? req.request_status === 'completed' : req.request_status !== 'completed'
-        );
+        const statusFiltered = statusFilter
+          ? rawData
+          : rawData.filter(req =>
+              isCompletedPage ? req.request_status === 'completed' : req.request_status !== 'completed'
+            );
 
         setDataState({ items: statusFiltered, loading: false, error: null });
       } catch (err) {
@@ -59,7 +66,7 @@ export default function RequestsList() {
     return () => {
       abortController.abort();
     };
-  }, [isCompletedPage]);
+  }, [isCompletedPage, statusFilter]);
 
   const uniqueTypes = useMemo(() => {
     const types = new Set(dataState.items.map(req => req.aid_request_type?.type_name || 'عام'));
@@ -179,13 +186,26 @@ export default function RequestsList() {
                 + إضافة طلب جديد
               </button>
             )}
-            <input 
-              type="text" 
-              placeholder="ابحث برقم الطلب أو اسم المريض..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full sm:w-80 border border-gray-200 p-2.5 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-all"
-            />
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="border border-gray-200 p-2.5 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold shadow-sm"
+              >
+                <option value="">{isCompletedPage ? 'كل المنجزة' : 'كل الطلبات'}</option>
+                {!isCompletedPage && <option value="pending">قيد الدراسة</option>}
+                {!isCompletedPage && <option value="processing">معالجة</option>}
+                <option value="completed">مكتمل</option>
+                <option value="rejected">مرفوض</option>
+              </select>
+              <input 
+                type="text" 
+                placeholder="ابحث برقم الطلب أو اسم المريض..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full sm:w-72 border border-gray-200 p-2.5 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-all"
+              />
+            </div>
           </div>
         </div>
 

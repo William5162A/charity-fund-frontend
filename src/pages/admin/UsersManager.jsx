@@ -18,11 +18,14 @@ export default function UsersManager() {
 
   const [deleteModal, setDeleteModal] = useState({ show: false, userId: null, userName: '', userRole: '' });
 
-  const loadUsers = async (signal) => {
+  const [roleFilter, setRoleFilter] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const loadUsers = async (signal, params = {}) => {
     setLoading(true);
 
     try {
-      const data = await fetchUsers(signal);
+      const data = await fetchUsers(signal, params);
 
       if (signal?.aborted) return;
 
@@ -40,12 +43,15 @@ export default function UsersManager() {
 
   useEffect(() => {
     const abortController = new AbortController();
-    loadUsers(abortController.signal);
+    const params = {};
+    if (roleFilter) params.role = roleFilter;
+    if (searchTerm.trim()) params.search = searchTerm.trim();
+    loadUsers(abortController.signal, params);
 
     return () => {
       abortController.abort();
     };
-  }, []);
+  }, [roleFilter, searchTerm]);
 
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -245,8 +251,27 @@ export default function UsersManager() {
 
           <div className="xl:col-span-2">
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="bg-gray-50 p-5 border-b border-gray-100 flex justify-between items-center">
+              <div className="bg-gray-50 p-5 border-b border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <h3 className="font-bold text-gray-800 text-lg">الحسابات المسجلة في الخادم ({users.length})</h3>
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                  <input
+                    type="text"
+                    placeholder="ابحث بالاسم أو البريد..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full md:w-56 border border-gray-200 p-2 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                  />
+                  <select
+                    value={roleFilter}
+                    onChange={(e) => setRoleFilter(e.target.value)}
+                    className="border border-gray-200 p-2 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold"
+                  >
+                    <option value="">كل الصلاحيات</option>
+                    <option value={ROLES.ADMIN}>مدير نظام</option>
+                    <option value={ROLES.PROCESSOR}>لجنة إدارية</option>
+                    <option value={ROLES.DOCTOR}>طبيب</option>
+                  </select>
+                </div>
               </div>
 
               {loading ? (
