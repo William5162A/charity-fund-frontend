@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// الرابط الأساسي للباك إند
-const BASE_URL = 'http://127.0.0.1:8000/api/';
+// إعداد ديناميكي للرابط الأساسي لبيئة الإنتاج والتطوير المحلي لـ Vite
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/';
 
 const asArray = (data) => {
   if (Array.isArray(data)) return data;
